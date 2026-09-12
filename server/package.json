@@ -6,17 +6,22 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
+    "start:prod": "pm2 start ecosystem.config.cjs",
     "dev": "nodemon src/index.js",
     "test": "node --test test/*.test.js",
     "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate deploy",
+    "db:status": "prisma migrate status",
     "db:push": "prisma db push",
     "db:seed": "node src/seed.js"
   },
   "dependencies": {
     "@prisma/client": "^6.4.1",
+    "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.3",
     "morgan": "^1.10.0",
     "pdfkit": "^0.20.2",
     "pg": "^8.13.3"

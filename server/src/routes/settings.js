@@ -5,12 +5,13 @@ const router = Router();
 
 // Default initial settings
 const DEFAULT_SETTINGS = {
-  name: 'Prathna Enterprises',
-  address: '42, Industrial Estate, Phase-1, Ahmedabad, Gujarat - 380015',
-  phone: '+91 98765 43210',
-  gstin: '24AAACP9988P1Z8',
-  pan: 'AAACP9988P',
-  terms: '1. Goods once sold will not be taken back.\n2. Subject to Ahmedabad jurisdiction.',
+  name: 'Your Company Name',
+  address: '',
+  phone: '',
+  gstin: '',
+  pan: '',
+  terms: '1. Goods once sold will not be taken back.\n2. Subject to local jurisdiction.',
+  termsGujarati: 'શરતો અને નિયમો:\n\n૧. એકવાર વેચેલો માલ પાછો લેવામાં આવશે નહીં.\n૨. વોરંટી કંપનીના નિયમો મુજબ રહેશે.\n૩. ન્યાય ક્ષેત્ર સ્થાનિક રહેશે.',
 };
 
 // GET /settings - get current company settings
@@ -20,6 +21,11 @@ router.get('/', async (req, res) => {
     if (!settings) {
       settings = await prisma.companySettings.create({
         data: DEFAULT_SETTINGS,
+      });
+    } else if (!settings.termsGujarati) {
+      settings = await prisma.companySettings.update({
+        where: { id: settings.id },
+        data: { termsGujarati: DEFAULT_SETTINGS.termsGujarati },
       });
     }
     res.json(settings);
@@ -32,7 +38,7 @@ router.get('/', async (req, res) => {
 // POST /settings - update company settings
 router.post('/', async (req, res) => {
   try {
-    const { name, address, phone, gstin, pan, terms } = req.body;
+    const { name, address, phone, gstin, pan, terms, termsGujarati } = req.body;
 
     const existing = await prisma.companySettings.findFirst();
 
@@ -47,6 +53,7 @@ router.post('/', async (req, res) => {
           gstin: gstin !== undefined ? gstin.trim().toUpperCase() : existing.gstin,
           pan: pan !== undefined ? pan.trim().toUpperCase() : existing.pan,
           terms: terms !== undefined ? terms.trim() : existing.terms,
+          termsGujarati: termsGujarati !== undefined ? termsGujarati.trim() : (existing.termsGujarati || DEFAULT_SETTINGS.termsGujarati),
         },
       });
     } else {
@@ -58,6 +65,7 @@ router.post('/', async (req, res) => {
           gstin: gstin ? gstin.trim().toUpperCase() : DEFAULT_SETTINGS.gstin,
           pan: pan ? pan.trim().toUpperCase() : DEFAULT_SETTINGS.pan,
           terms: terms ? terms.trim() : DEFAULT_SETTINGS.terms,
+          termsGujarati: termsGujarati ? termsGujarati.trim() : DEFAULT_SETTINGS.termsGujarati,
         },
       });
     }

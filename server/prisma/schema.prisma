@@ -8,11 +8,12 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default(uuid())
-  name      String
-  email     String   @unique
-  password  String
-  createdAt DateTime @default(now())
+  id                 String   @id @default(uuid())
+  name               String
+  email              String   @unique
+  password           String
+  mustChangePassword Boolean  @default(false)
+  createdAt          DateTime @default(now())
 }
 
 model Product {
@@ -64,7 +65,8 @@ model Invoice {
 
   createdAt DateTime @default(now())
 
-  items InvoiceItem[]
+  items   InvoiceItem[]
+  returns SalesReturn[]
 }
 
 model InvoiceItem {
@@ -86,6 +88,8 @@ model InvoiceItem {
   cgstAmount   Decimal @db.Decimal(10, 2)
   sgstAmount   Decimal @db.Decimal(10, 2)
   amount       Decimal @db.Decimal(10, 2) // final line total
+
+  returnItems SalesReturnItem[]
 }
 
 model StockTransaction {
@@ -134,10 +138,10 @@ model PurchaseItem {
   productId  String
   product    Product  @relation(fields: [productId], references: [id])
 
-  qty      Decimal @db.Decimal(10, 2)
-  rate     Decimal @db.Decimal(10, 2)
-  gstRate  Decimal @db.Decimal(5, 2)
-  amount   Decimal @db.Decimal(10, 2)
+  qty     Decimal @db.Decimal(10, 2)
+  rate    Decimal @db.Decimal(10, 2)
+  gstRate Decimal @db.Decimal(5, 2)
+  amount  Decimal @db.Decimal(10, 2)
 }
 
 model InvoiceCounter {
@@ -147,12 +151,38 @@ model InvoiceCounter {
 }
 
 model CompanySettings {
-  id        String   @id @default(uuid())
-  name      String   @default("Prathna Enterprises")
-  address   String?  @default("42, Industrial Estate, Phase-1, Ahmedabad, Gujarat - 380015")
-  phone     String?  @default("+91 98765 43210")
-  gstin     String?  @default("24AAACP9988P1Z8")
-  pan       String?  @default("AAACP9988P")
-  terms     String?  @default("1. Goods once sold will not be taken back.\n2. Subject to Ahmedabad jurisdiction.")
-  updatedAt DateTime @updatedAt
+  id            String   @id @default(uuid())
+  name          String   @default("Your Company Name")
+  address       String?  @default("")
+  phone         String?  @default("")
+  gstin         String?  @default("")
+  pan           String?  @default("")
+  terms         String?  @default("1. Goods once sold will not be taken back.\n2. Subject to local jurisdiction.")
+  termsGujarati String?  @default("શરતો અને નિયમો:\n\n૧. એકવાર વેચેલો માલ પાછો લેવામાં આવશે નહીં.\n૨. વોરંટી કંપનીના નિયમો મુજબ રહેશે.\n૩. ન્યાય ક્ષેત્ર સ્થાનિક રહેશે.")
+  updatedAt     DateTime @updatedAt
+}
+
+// --- Slice 3 Models: Sales Returns ---
+
+model SalesReturn {
+  id          String   @id @default(uuid())
+  invoiceId   String
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id])
+  returnDate  DateTime @default(now())
+  reason      String?
+  totalAmount Decimal  @db.Decimal(10, 2)
+  createdAt   DateTime @default(now())
+
+  items SalesReturnItem[]
+}
+
+model SalesReturnItem {
+  id            String      @id @default(uuid())
+  salesReturnId String
+  salesReturn   SalesReturn @relation(fields: [salesReturnId], references: [id], onDelete: Cascade)
+  invoiceItemId String
+  invoiceItem   InvoiceItem @relation(fields: [invoiceItemId], references: [id])
+
+  qty    Decimal @db.Decimal(10, 2)
+  amount Decimal @db.Decimal(10, 2)
 }

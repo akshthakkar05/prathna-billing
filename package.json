@@ -7,6 +7,7 @@
     "dev": "concurrently \"npm run server\" \"npm run client\"",
     "server": "npm run dev --prefix server",
     "client": "npm run dev --prefix client",
+    "start:prod": "npm run start:prod --prefix server",
     "build": "npm run build --prefix client",
     "install:all": "npm install && npm install --prefix server && npm install --prefix client",
     "db:generate": "npm run db:generate --prefix server",

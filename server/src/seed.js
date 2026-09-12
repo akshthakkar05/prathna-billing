@@ -1,19 +1,30 @@
+import bcrypt from 'bcryptjs';
 import prisma from './db.js';
 
 async function main() {
-  console.log('🌱 Seeding Prathna Billing database...');
+  if (process.env.NODE_ENV === 'production') {
+    console.log('⚠️ Seeding skipped in production environment. Do not populate demo data in production.');
+    return;
+  }
 
-  // 1. Create default user
+  console.log('🌱 Seeding development database...');
+
+  // 1. Create default user with bcrypt hashed password for initial local development setup
+  const adminEmail = process.env.ADMIN_EMAIL || 'admin@prathna.com';
+  const adminPass = process.env.ADMIN_PASSWORD || 'password123';
+  const hashedPassword = await bcrypt.hash(adminPass, 10);
   const user = await prisma.user.upsert({
-    where: { email: 'admin@prathna.com' },
-    update: {},
+    where: { email: adminEmail },
+    update: {
+      password: hashedPassword,
+    },
     create: {
-      name: 'Prathna Admin',
-      email: 'admin@prathna.com',
-      password: 'password123',
+      name: 'Initial Admin',
+      email: adminEmail,
+      password: hashedPassword,
     },
   });
-  console.log('✅ User seeded:', user.email);
+  console.log('✅ Initial dev admin credential ready:', user.email);
 
   // 2. Create sample Customers
   const customersData = [

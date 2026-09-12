@@ -9,6 +9,11 @@ import invoicesRouter from './routes/invoices.js';
 import suppliersRouter from './routes/suppliers.js';
 import purchasesRouter from './routes/purchases.js';
 import settingsRouter from './routes/settings.js';
+import dashboardRouter from './routes/dashboard.js';
+import reportsRouter from './routes/reports.js';
+
+import authRouter from './routes/auth.js';
+import { requireAuth, enforcePasswordChange } from './middleware/auth.js';
 
 dotenv.config();
 
@@ -20,34 +25,50 @@ app.use(cors());
 app.use(express.json());
 app.use(morgan('dev'));
 
-// Health check
-app.get('/health', (req, res) => res.json({ status: 'ok', service: 'Billing V1 & V2' }));
-app.get('/api/health', (req, res) => res.json({ status: 'ok', service: 'Billing V1 & V2' }));
+// Health check (public)
+app.get('/health', (req, res) => res.json({ status: 'ok', service: 'Billing V1, V2, V3 & Auth V4' }));
+app.get('/api/health', (req, res) => res.json({ status: 'ok', service: 'Billing V1, V2, V3 & Auth V4' }));
 
-// Express routes:
+// Auth Routes (public)
+app.use('/auth', authRouter);
+app.use('/api/auth', authRouter);
+
+// Protected Routes (Slice 1-3)
+// All protected routes run requireAuth then enforcePasswordChange.
+// enforcePasswordChange blocks requests when mustChangePassword=true EXCEPT
+// for /auth/change-password which is explicitly exempted inside the middleware.
+
 // Products
-app.use('/products', productsRouter);
-app.use('/api/products', productsRouter);
+app.use('/products', requireAuth, enforcePasswordChange, productsRouter);
+app.use('/api/products', requireAuth, enforcePasswordChange, productsRouter);
 
 // Customers
-app.use('/customers', customersRouter);
-app.use('/api/customers', customersRouter);
+app.use('/customers', requireAuth, enforcePasswordChange, customersRouter);
+app.use('/api/customers', requireAuth, enforcePasswordChange, customersRouter);
 
-// Invoices (including /invoices/:id/pdf)
-app.use('/invoices', invoicesRouter);
-app.use('/api/invoices', invoicesRouter);
+// Invoices (including /invoices/:id/returns and /invoices/:id/pdf)
+app.use('/invoices', requireAuth, enforcePasswordChange, invoicesRouter);
+app.use('/api/invoices', requireAuth, enforcePasswordChange, invoicesRouter);
 
 // Suppliers (Slice 2)
-app.use('/suppliers', suppliersRouter);
-app.use('/api/suppliers', suppliersRouter);
+app.use('/suppliers', requireAuth, enforcePasswordChange, suppliersRouter);
+app.use('/api/suppliers', requireAuth, enforcePasswordChange, suppliersRouter);
 
 // Purchases (Slice 2)
-app.use('/purchases', purchasesRouter);
-app.use('/api/purchases', purchasesRouter);
+app.use('/purchases', requireAuth, enforcePasswordChange, purchasesRouter);
+app.use('/api/purchases', requireAuth, enforcePasswordChange, purchasesRouter);
 
 // Company Settings (Slice 2)
-app.use('/settings', settingsRouter);
-app.use('/api/settings', settingsRouter);
+app.use('/settings', requireAuth, enforcePasswordChange, settingsRouter);
+app.use('/api/settings', requireAuth, enforcePasswordChange, settingsRouter);
+
+// Dashboard (Slice 3)
+app.use('/dashboard', requireAuth, enforcePasswordChange, dashboardRouter);
+app.use('/api/dashboard', requireAuth, enforcePasswordChange, dashboardRouter);
+
+// Reports (Slice 3)
+app.use('/reports', requireAuth, enforcePasswordChange, reportsRouter);
+app.use('/api/reports', requireAuth, enforcePasswordChange, reportsRouter);
 
 // Global Error Handler
 app.use((err, req, res, next) => {
@@ -57,8 +78,10 @@ app.use((err, req, res, next) => {
   });
 });
 
-app.listen(PORT, () => {
-  console.log(`🚀 Billing Server running on http://localhost:${PORT}`);
-});
+if (process.env.NODE_ENV !== 'test') {
+  app.listen(PORT, () => {
+    console.log(`🚀 Billing Server running on http://localhost:${PORT}`);
+  });
+}
 
 export default app;

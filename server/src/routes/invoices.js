@@ -31,7 +31,11 @@ router.get('/:id/pdf', async (req, res) => {
       where: { id: req.params.id },
       include: {
         customer: true,
-        items: true, // Snapshots are preserved on items
+        items: {
+          include: {
+            product: true,
+          },
+        },
       },
     });
 
@@ -40,8 +44,9 @@ router.get('/:id/pdf', async (req, res) => {
     }
 
     let company = await prisma.companySettings.findFirst();
+    const copy = req.query.copy || 'Original';
 
-    const pdfBuffer = await generateInvoicePDF(invoice, company);
+    const pdfBuffer = await generateInvoicePDF(invoice, company, { copy });
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="${invoice.invoiceNumber}.pdf"`);
@@ -124,22 +129,13 @@ router.post('/', async (req, res) => {
           throw new Error('Quantity must be greater than zero');
         }
 
-        // Fetch live product to get current stock and pricing
+        // Fetch live product to get pricing info (not for stock check — that's done atomically below)
         const product = await tx.product.findUnique({
           where: { id: item.productId },
         });
 
         if (!product) {
           throw new Error(`Product not found with id: ${item.productId}`);
-        }
-
-        const currentStock = new Decimal(product.currentStock);
-
-        // Insufficient stock check: REJECT whole invoice if any product has insufficient stock
-        if (currentStock.lessThan(requestedQty)) {
-          throw new Error(
-            `Insufficient stock for product "${product.name}". Available: ${currentStock.toString()}, Requested: ${requestedQty.toString()}`
-          );
         }
 
         // Determine rate (excl. GST)
@@ -167,13 +163,26 @@ router.post('/', async (req, res) => {
           amount: calc.amount,
         });
 
-        // Update product stock
-        await tx.product.update({
-          where: { id: product.id },
+        // Atomically decrement stock at DB level — only succeeds if currentStock >= requestedQty.
+        // Using updateMany with a WHERE guard is the safe concurrent approach: no read-check-write
+        // race window exists because the DB evaluates the condition and write in one operation.
+        const stockUpdated = await tx.product.updateMany({
+          where: {
+            id: product.id,
+            currentStock: { gte: requestedQty },
+          },
           data: {
-            currentStock: currentStock.minus(requestedQty),
+            currentStock: { decrement: requestedQty },
           },
         });
+
+        if (stockUpdated.count === 0) {
+          // Re-read current stock just to give a helpful error message (the atomic check already failed)
+          const fresh = await tx.product.findUnique({ where: { id: product.id }, select: { currentStock: true, name: true } });
+          throw new Error(
+            `Insufficient stock for product "${fresh?.name ?? product.name}". Available: ${fresh?.currentStock?.toString() ?? '0'}, Requested: ${requestedQty.toString()}`
+          );
+        }
 
         // Write a stock_transaction of type SALE (negative quantity) for each item
         await tx.stockTransaction.create({
@@ -219,6 +228,166 @@ router.post('/', async (req, res) => {
   } catch (error) {
     console.error('Error creating invoice:', error.message);
     res.status(400).json({ error: error.message || 'Failed to create invoice' });
+  }
+});
+
+// GET /invoices/:id/returns - list returns against an invoice
+router.get('/:id/returns', async (req, res) => {
+  try {
+    const returns = await prisma.salesReturn.findMany({
+      where: { invoiceId: req.params.id },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        items: {
+          include: {
+            invoiceItem: {
+              include: { product: true },
+            },
+          },
+        },
+      },
+    });
+    res.json(returns);
+  } catch (error) {
+    console.error('Error fetching invoice returns:', error);
+    res.status(500).json({ error: 'Failed to fetch invoice returns', details: error.message });
+  }
+});
+
+// POST /invoices/:id/returns - Create sales return and restock atomically
+router.post('/:id/returns', async (req, res) => {
+  try {
+    const invoiceId = req.params.id;
+    const { returnDate, reason, items } = req.body;
+
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: 'Sales return must contain at least one item' });
+    }
+
+    const savedReturn = await prisma.$transaction(async (tx) => {
+      // 1. Verify invoice exists
+      const invoice = await tx.invoice.findUnique({
+        where: { id: invoiceId },
+        include: {
+          items: true,
+        },
+      });
+
+      if (!invoice) {
+        throw new Error(`Invoice not found with id: ${invoiceId}`);
+      }
+
+      let totalReturnAmount = new Decimal(0);
+      const preparedReturnItems = [];
+
+      for (const item of items) {
+        if (!item.invoiceItemId) {
+          throw new Error('Each item must specify an invoiceItemId');
+        }
+
+        const requestedQty = new Decimal(item.qty || 0);
+        if (requestedQty.lte(0)) {
+          throw new Error('Return quantity must be greater than zero');
+        }
+
+        // Verify invoiceItem belongs to this invoice
+        const invoiceItem = invoice.items.find((i) => i.id === item.invoiceItemId);
+        if (!invoiceItem) {
+          throw new Error(
+            `Invoice item ${item.invoiceItemId} does not belong to invoice ${invoice.invoiceNumber}`
+          );
+        }
+
+        // Acquire a row-level lock on the InvoiceItem before summing previous returns.
+        // This prevents the aggregate race condition: without the lock, two concurrent
+        // return requests both read sum=0, both pass the check, and both write — allowing
+        // over-return. The FOR UPDATE lock serialises this check-and-write window.
+        await tx.$queryRaw`
+          SELECT id FROM "InvoiceItem"
+          WHERE id = ${invoiceItem.id}
+          FOR UPDATE
+        `;
+
+        // Now safely read previous returns for this item — no concurrent write can race past the lock
+        const previousReturns = await tx.salesReturnItem.findMany({
+          where: { invoiceItemId: invoiceItem.id },
+        });
+
+        const alreadyReturnedQty = previousReturns.reduce(
+          (sum, r) => sum.plus(new Decimal(r.qty)),
+          new Decimal(0)
+        );
+
+        const originallySoldQty = new Decimal(invoiceItem.qty);
+        const maxReturnableQty = originallySoldQty.minus(alreadyReturnedQty);
+
+        if (requestedQty.greaterThan(maxReturnableQty)) {
+          throw new Error(
+            `Cannot return ${requestedQty.toString()} units of "${invoiceItem.descriptionSnapshot}". Originally sold: ${originallySoldQty.toString()}, already returned: ${alreadyReturnedQty.toString()}, max returnable: ${maxReturnableQty.toString()}`
+          );
+        }
+
+        // Calculate proportional line amount based on snapshot amount per unit
+        const unitAmount = new Decimal(invoiceItem.amount).div(originallySoldQty);
+        const lineReturnAmount = requestedQty.mul(unitAmount).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+        totalReturnAmount = totalReturnAmount.plus(lineReturnAmount);
+
+        preparedReturnItems.push({
+          invoiceItemId: invoiceItem.id,
+          productId: invoiceItem.productId,
+          qty: requestedQty,
+          amount: lineReturnAmount,
+        });
+      }
+
+      // 2. Create SalesReturn record
+      const salesReturn = await tx.salesReturn.create({
+        data: {
+          invoiceId: invoice.id,
+          returnDate: returnDate ? new Date(returnDate) : new Date(),
+          reason: reason ? reason.trim() : null,
+          totalAmount: totalReturnAmount.toDecimalPlaces(2, Decimal.ROUND_HALF_UP),
+          items: {
+            create: preparedReturnItems.map((pi) => ({
+              invoiceItemId: pi.invoiceItemId,
+              qty: pi.qty,
+              amount: pi.amount,
+            })),
+          },
+        },
+        include: {
+          items: true,
+        },
+      });
+
+      // 3. For each returned item: increase product stock & write StockTransaction (SALES_RETURN)
+      for (const pi of preparedReturnItems) {
+        await tx.product.update({
+          where: { id: pi.productId },
+          data: {
+            currentStock: {
+              increment: pi.qty,
+            },
+          },
+        });
+
+        await tx.stockTransaction.create({
+          data: {
+            productId: pi.productId,
+            type: 'SALES_RETURN',
+            quantity: pi.qty, // positive = stock in
+            reference: salesReturn.id,
+          },
+        });
+      }
+
+      return salesReturn;
+    });
+
+    res.status(201).json(savedReturn);
+  } catch (error) {
+    console.error('Error creating sales return:', error.message);
+    res.status(400).json({ error: error.message || 'Failed to create sales return' });
   }
 });
 
