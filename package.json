@@ -1,0 +1,22 @@
+{
+  "name": "prathna-billing",
+  "version": "1.0.0",
+  "description": "PERN stack GST billing & inventory management application",
+  "main": "server/index.js",
+  "scripts": {
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "server": "npm run dev --prefix server",
+    "client": "npm run dev --prefix client",
+    "build": "npm run build --prefix client",
+    "install:all": "npm install && npm install --prefix server && npm install --prefix client",
+    "db:generate": "npm run db:generate --prefix server",
+    "db:push": "npm run db:push --prefix server",
+    "db:seed": "npm run db:seed --prefix server"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  },
+  "keywords": ["billing", "gst", "pern", "react", "express", "postgresql"],
+  "author": "",
+  "license": "ISC"
+}

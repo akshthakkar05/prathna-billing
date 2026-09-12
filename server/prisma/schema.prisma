@@ -1,0 +1,158 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(uuid())
+  name      String
+  email     String   @unique
+  password  String
+  createdAt DateTime @default(now())
+}
+
+model Product {
+  id            String   @id @default(uuid())
+  name          String
+  sku           String?  @unique
+  hsnCode       String
+  gstRate       Decimal  @db.Decimal(5, 2) // e.g. 18.00
+  purchasePrice Decimal  @db.Decimal(10, 2)
+  sellingPrice  Decimal  @db.Decimal(10, 2)
+  currentStock  Decimal  @default(0) @db.Decimal(10, 2)
+  minStockLevel Decimal  @default(0) @db.Decimal(10, 2)
+  unit          String   @default("PCS")
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+
+  invoiceItems      InvoiceItem[]
+  purchaseItems     PurchaseItem[]
+  stockTransactions StockTransaction[]
+}
+
+model Customer {
+  id        String   @id @default(uuid())
+  name      String
+  mobile    String?
+  address   String?
+  gstin     String?
+  createdAt DateTime @default(now())
+
+  invoices Invoice[]
+}
+
+model Invoice {
+  id            String   @id @default(uuid())
+  invoiceNumber String   @unique // e.g. INV-1001
+  invoiceDate   DateTime @default(now())
+
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id])
+
+  taxableTotal Decimal @db.Decimal(10, 2)
+  cgstTotal    Decimal @db.Decimal(10, 2)
+  sgstTotal    Decimal @db.Decimal(10, 2)
+  roundOff     Decimal @default(0) @db.Decimal(10, 2)
+  billAmount   Decimal @db.Decimal(10, 2)
+
+  paymentStatus String  @default("UNPAID") // UNPAID | PARTIAL | PAID
+  paymentMethod String? // CASH | UPI | CARD | CREDIT
+
+  createdAt DateTime @default(now())
+
+  items InvoiceItem[]
+}
+
+model InvoiceItem {
+  id        String  @id @default(uuid())
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id])
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+
+  // Snapshot fields — never re-derive from live Product later
+  descriptionSnapshot String
+  hsnSnapshot         String
+  gstRateSnapshot     Decimal @db.Decimal(5, 2)
+
+  qty          Decimal @db.Decimal(10, 2)
+  rate         Decimal @db.Decimal(10, 2) // rate excl. GST
+  taxableValue Decimal @db.Decimal(10, 2)
+  cgstAmount   Decimal @db.Decimal(10, 2)
+  sgstAmount   Decimal @db.Decimal(10, 2)
+  amount       Decimal @db.Decimal(10, 2) // final line total
+}
+
+model StockTransaction {
+  id        String   @id @default(uuid())
+  productId String
+  product   Product  @relation(fields: [productId], references: [id])
+
+  type      String   // PURCHASE | SALE | SALES_RETURN | PURCHASE_RETURN | ADJUSTMENT
+  quantity  Decimal  @db.Decimal(10, 2) // positive = stock in, negative = stock out
+  reference String?  // e.g. invoice id or purchase id
+  createdAt DateTime @default(now())
+}
+
+// --- Slice 2 Models ---
+
+model Supplier {
+  id        String   @id @default(uuid())
+  name      String
+  mobile    String?
+  address   String?
+  gstin     String?
+  pan       String?
+  notes     String?
+  createdAt DateTime @default(now())
+
+  purchases Purchase[]
+}
+
+model Purchase {
+  id              String   @id @default(uuid())
+  supplierId      String
+  supplier        Supplier @relation(fields: [supplierId], references: [id])
+  referenceNumber String   // invoice/reference number
+  purchaseDate    DateTime @default(now())
+  totalAmount     Decimal  @db.Decimal(10, 2)
+  notes           String?
+  createdAt       DateTime @default(now())
+
+  items PurchaseItem[]
+}
+
+model PurchaseItem {
+  id         String   @id @default(uuid())
+  purchaseId String
+  purchase   Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id])
+
+  qty      Decimal @db.Decimal(10, 2)
+  rate     Decimal @db.Decimal(10, 2)
+  gstRate  Decimal @db.Decimal(5, 2)
+  amount   Decimal @db.Decimal(10, 2)
+}
+
+model InvoiceCounter {
+  id      Int    @id @default(autoincrement())
+  name    String @unique
+  current Int    @default(1000)
+}
+
+model CompanySettings {
+  id        String   @id @default(uuid())
+  name      String   @default("Prathna Enterprises")
+  address   String?  @default("42, Industrial Estate, Phase-1, Ahmedabad, Gujarat - 380015")
+  phone     String?  @default("+91 98765 43210")
+  gstin     String?  @default("24AAACP9988P1Z8")
+  pan       String?  @default("AAACP9988P")
+  terms     String?  @default("1. Goods once sold will not be taken back.\n2. Subject to Ahmedabad jurisdiction.")
+  updatedAt DateTime @updatedAt
+}
