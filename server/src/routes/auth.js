@@ -70,7 +70,7 @@ router.post('/register', async (req, res) => {
         name: user.name,
       },
       JWT_SECRET,
-      { expiresIn: '7d' }
+      { expiresIn: '7d', algorithm: 'HS512' }
     );
 
     res.status(201).json({
@@ -136,7 +136,7 @@ router.post('/login', async (req, res) => {
         mustChangePassword: user.mustChangePassword,
       },
       JWT_SECRET,
-      { expiresIn: '7d' }
+      { expiresIn: '7d', algorithm: 'HS512' }
     );
 
     res.json({
@@ -237,7 +237,7 @@ router.post('/change-password', requireAuth, async (req, res) => {
     const token = jwt.sign(
       { id: user.id, email: user.email, name: user.name, mustChangePassword: false },
       JWT_SECRET,
-      { expiresIn: '7d' }
+      { expiresIn: '7d', algorithm: 'HS512' }
     );
 
     res.json({

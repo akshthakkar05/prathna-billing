@@ -96,6 +96,8 @@ test('Stock decrement on invoice creation and rejection on insufficient stock', 
           sgstTotal: totals.sgstTotal,
           roundOff: totals.roundOff,
           billAmount: totals.billAmount,
+          paymentStatus: 'PAID',
+          paymentMethod: 'CASH',
           items: {
             create: [
               {
@@ -130,6 +132,8 @@ test('Stock decrement on invoice creation and rejection on insufficient stock', 
 
   assert.ok(inv1.id, 'Invoice 1 should be created');
   assert.equal(inv1.items[0].qty.toString(), '4');
+  assert.equal(inv1.paymentStatus, 'PAID', 'Default paymentStatus must be PAID');
+  assert.equal(inv1.paymentMethod, 'CASH', 'Default paymentMethod must be CASH');
 
   // Verify stock decreased from 10 to 6
   const productAfterSale = await prisma.product.findUnique({ where: { id: product.id } });

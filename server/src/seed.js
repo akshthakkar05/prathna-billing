@@ -3,11 +3,11 @@ import prisma from './db.js';
 
 async function main() {
   if (process.env.NODE_ENV === 'production') {
-    console.log('⚠️ Seeding skipped in production environment. Do not populate demo data in production.');
+    console.log('[seed] Seeding skipped in production environment.');
     return;
   }
 
-  console.log('🌱 Seeding development database...');
+  console.log('[seed] Seeding development database...');
 
   // 1. Create default user with bcrypt hashed password for initial local development setup
   const adminEmail = process.env.ADMIN_EMAIL || 'admin@prathna.com';
@@ -24,7 +24,7 @@ async function main() {
       password: hashedPassword,
     },
   });
-  console.log('✅ Initial dev admin credential ready:', user.email);
+  console.log('[seed] Initial dev admin credential ready:', user.email);
 
   // 2. Create sample Customers
   const customersData = [
@@ -64,7 +64,7 @@ async function main() {
     }
     customers.push(customer);
   }
-  console.log(`✅ ${customers.length} Customers ready.`);
+  console.log(`[seed] ${customers.length} Customers ready.`);
 
   // 3. Create client's real Products
   const productsData = [
@@ -112,9 +112,9 @@ async function main() {
     }
     products.push(product);
   }
-  console.log(`✅ ${products.length} Products ready.`);
+  console.log(`[seed] ${products.length} Products ready.`);
 
-  console.log('✨ Database seeding finished successfully.');
+  console.log('[seed] Database seeding finished successfully.');
 }
 
 main()

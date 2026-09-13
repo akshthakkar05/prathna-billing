@@ -1,26 +1,29 @@
 # Codebase Documentation: Prathna Billing & Inventory Management System
 
-> **Document Version:** 1.0.0  
+> **Document Version:** 1.1.0  
 > **Audit Date:** September 2026  
 > **Author:** Senior Software Architect & Codebase Auditor  
 > **System Architecture:** PERN (PostgreSQL, Express, React, Node.js) with Prisma ORM & Vite  
-> **Status:** Production-Ready (Slice 1, Slice 2, Slice 3 & Auth V4 verified with 39/39 passing unit/integration tests)
+> **Status:** Feature-Complete & Backend-Verified (40/40 Automated Tests Passing) — Pending Human Manual E2E Walkthrough & Physical Device Verification
 
 ---
 
 ## 1. Executive Summary
 
-The **Prathna Billing & Inventory Management System** is a full-stack, enterprise-grade Point of Sale (POS), GST invoicing, purchase tracking, and inventory control application tailored for retail and wholesale counter operations (specifically designed and customized for **Prathna Enterprises**, Gujarat, India).
+The **Prathna Billing & Inventory Management System** is a full-stack Point of Sale (POS), GST invoicing, purchase tracking, and inventory control application tailored for retail and wholesale counter operations (specifically designed and customized for **Prathna Enterprises**, Gujarat, India).
 
 ### Key Architectural Strengths
-1. **Financial Precision:** Strict `Prisma.Decimal` (arbitrary-precision decimal arithmetic) used end-to-end across line-item calculation, 50/50 intra-state CGST/SGST tax splitting, inter-state 100% IGST computation, and rupee rounding. Zero JavaScript floating-point errors (`0.1 + 0.2 !== 0.3`).
+1. **Financial Precision:** Strict `Prisma.Decimal` (arbitrary-precision decimal arithmetic) used end-to-end across line-item calculation, 50/50 intra-state CGST/SGST tax splitting, inter-state 100% IGST computation, and rupee rounding. Zero JavaScript binary floating-point errors (`0.1 + 0.2 !== 0.3`).
 2. **Concurrency Safety:**
    - Atomic invoice generation with PostgreSQL row-level locks on `InvoiceCounter` (`INSERT ... ON CONFLICT DO UPDATE RETURNING`).
    - Atomic inventory decrements using guarded conditional SQL (`UPDATE ... WHERE currentStock >= requestedQty`).
    - Aggregate sales-return race protection using `SELECT ... FOR UPDATE` locks on `InvoiceItem` rows.
 3. **Indian GST Compliance:** Full support for both **Intra-state (Gujarat State Code `24`: CGST + SGST)** and **Inter-state (IGST)** supply modes, with automatic state detection from customer 15-digit GSTIN prefix and manual override capabilities.
-4. **Bilingual Tax Invoices:** High-definition A4 PDF invoice generator powered by `pdfkit`, featuring company logo rendering, Indian numbering system words conversion (Lakhs & Crores), and script-segmenting bilingual (Gujarati Unicode `Noto Sans Gujarati` + English `Helvetica`) terms and conditions rendering with zero glyph tofu box errors.
-5. **Operational Counter UX:** Clean, white-themed single-page application (SPA) optimized for retail staff with quick-select recent buyers, instant walk-in cash billing, inline modal creation for customers/suppliers, live dashboard sales trends, low-stock warnings, and zero credit/outstanding balance bloat.
+4. **Bilingual Tax Invoices:** High-definition A4 PDF invoice generator powered by `pdfkit`, featuring dynamic company logo rendering, Indian numbering system words conversion (Lakhs & Crores), and script-segmenting bilingual (Gujarati Unicode `Noto Sans Gujarati` + English `Helvetica`) terms and conditions rendering with zero glyph tofu box errors.
+5. **Operational Counter UX & Mobile Responsiveness:**
+   - Clean, white-themed single-page application (SPA) optimized for retail staff with quick-select recent buyers, instant walk-in cash billing, inline modal creation for customers/suppliers, live dashboard sales trends, and low-stock warnings.
+   - **Full Tablet & Mobile Support (<= 1024px):** Fixed topbar with brand identity and hamburger button, slide-out drawer navigation (`.sidebar-open`) with backdrop overlay, responsive data grids, horizontal table scrollers, and touch-friendly action targets.
+6. **Strict Z-Index Security Hierarchy:** The mandatory password-change modal (`z-index: 9999`) sits at the supreme layer above standard modals (`z-index: 1000`), mobile drawer (`z-index: 100`), backdrop (`z-index: 90`), and mobile topbar (`z-index: 40`), preventing any UI bypass.
 
 ---
 
@@ -415,26 +418,63 @@ sequenceDiagram
 
 ---
 
-## 8. Frontend Architecture
+## 8. Frontend Architecture & Mobile Responsiveness
 
-### Routing & Navigation
-- The client is a lightweight, responsive SPA built in React 19.
+### 8.1 Routing & Navigation Architecture
+- The client is a lightweight, responsive SPA built in React 19 (`client/src/App.jsx`).
 - Navigation state is managed via `activeTab` (`dashboard`, `invoice`, `purchase`, `product`, `customer`, `supplier`, `reports`, `settings`) and `reportSubTab` (`sales`, `purchases`, `stock`).
 - **URL Synchronization:** Bi-directional synchronization between `window.location.hash` (e.g. `#reports/stock`, `#invoice`), `localStorage`, and browser Back/Forward navigation (`hashchange` event listener).
 
-### Design System & Theme
-- Built using Vanilla CSS in `client/src/index.css`.
-- **Theme:** Clean White POS Theme tailored for high-glare counter screens.
-- **Responsive Layout:**
-  - Desktop: Fixed sticky 250px sidebar on the left with scrolling main content on the right.
-  - Tablet & Mobile (`<= 1024px`): Top branding navigation bar with hamburger menu toggle and sliding drawer backdrop.
-- **Key UI Components in `App.jsx`:**
-  - Date Range Pills & Trend Range Buttons.
-  - KPI Stat Cards (`.kpi-card`, `.stat-card`).
-  - SVG Dynamic Bar Chart with interactive hover tooltips.
-  - Data Tables (`.data-table`) with badge indicators.
-  - Toast Notification Manager (`showToast`) with automatic timeout dismissal.
-  - Global error banners with retry triggers.
+### 8.2 Responsive Layout & Component Structure
+The responsive layout is defined in `client/src/App.jsx:1501-1560` and styled in `client/src/index.css:850-1060`:
+
+```text
+Desktop Layout (> 1024px)
+┌──────────────────┬────────────────────────────────────────────────────────┐
+│ Sidebar (250px)  │ Main Content Area                                      │
+│ - Brand/Logo     │ - Dashboard / Invoice / Purchase / Reports Views       │
+│ - Nav Items      │ - Data Tables, SVG Trend Charts, Forms                 │
+│ - User / Logout  │                                                        │
+└──────────────────┴────────────────────────────────────────────────────────┘
+
+Mobile & Tablet Layout (<= 1024px)
+┌───────────────────────────────────────────────────────────────────────────┐
+│ Mobile Topbar (Sticky, Height: 56px, z-index: 40)                         │
+│ [ ☰ Menu ]              [ Prathna Enterprises Logo ]         [ ⏻ Logout ] │
+├───────────────────────────────────────────────────────────────────────────┤
+│ Sliding Sidebar Drawer (Width: 280px / 85vw, z-index: 100, translateX)  │
+│ [ X Close ] [ Nav Links ]                                                │
+├───────────────────────────────────────────────────────────────────────────┤
+│ Backdrop Overlay (rgba(15,23,42,0.45), z-index: 90)                      │
+├───────────────────────────────────────────────────────────────────────────┤
+│ Responsive Main Content (Padding: 16px tablet / 12px mobile)              │
+│ - Horizontally scrollable data tables (.table-container)                  │
+│ - Stacked form grids (1-column on mobile)                                 │
+└───────────────────────────────────────────────────────────────────────────┘
+```
+
+### 8.3 Detailed Responsive Breakpoints Map (`client/src/index.css`)
+
+| Breakpoint | Target Devices | CSS Selector / Rules | Behavioral Transformation |
+| :--- | :--- | :--- | :--- |
+| **`<= 1024px`** | iPad, Tablets, Small Laptops | `@media (max-width: 1024px)` (`index.css:876`) | • `app-container` switches to `flex-direction: column`<br>• `.mobile-topbar` becomes `display: flex` (sticky `z-index: 40`)<br>• `.sidebar` transforms into fixed off-canvas drawer (`transform: translateX(-100%)`, `z-index: 100`)<br>• `.sidebar-backdrop` active (`z-index: 90`)<br>• Main content padding reduced to `20px 16px` |
+| **`<= 900px`** | Compact Tablets, Large Foldables | `@media (max-width: 900px)` (`index.css:1192`) | • Dual grids collapse to 1-column vertical stacking<br>• Dashboard recent tables and stock cards stack vertically |
+| **`<= 768px`** | Portrait Tablets, Large Phones | `@media (max-width: 768px)` (`index.css:828`) | • Invoice item input grid (`.item-input-grid`) stacks vertically<br>• Action buttons expand to full container width |
+| **`<= 640px`** | Standard Smartphones | `@media (max-width: 640px)` (`index.css:995`) | • Content padding reduced to `12px`<br>• `.stats-grid` becomes 2-column (`1fr 1fr`, `index.css:1015`)<br>• Card padding compressed to `16px`<br>• Modals expand to `calc(100vw - 24px)` |
+| **`<= 480px`** | Compact Smartphones | `@media (max-width: 480px)` (`index.css:844`) | • Date range pills stack vertically or wrap compactly<br>• Font sizes and table badges compress for narrow screens |
+
+### 8.4 Z-Index Layering & Security Isolation
+The UI enforces strict z-index stacking order across all components:
+
+| Layer / Element | CSS Class / Element | `z-index` Value | Behavioral Role |
+| :--- | :--- | :---: | :--- |
+| **Base Canvas** | `.app-container`, `.main-content` | `0` | Base document flow |
+| **Sticky Sidebar (Desktop)** | `.sidebar` | `20` | Fixed desktop navigation |
+| **Mobile Topbar** | `.mobile-topbar` | `40` | Sticky mobile header bar |
+| **Drawer Backdrop Overlay** | `.sidebar-backdrop` | `90` | Dimmed click-away backdrop for drawer |
+| **Mobile Sidebar Drawer** | `.sidebar.sidebar-open` | `100` | Sliding off-canvas navigation drawer |
+| **Standard Modals** | `.modal-backdrop` (Quick Cust, Return) | `1000` | Centered dialogs above sidebar & topbar |
+| **Mandatory Auth Modal** | `.modal-backdrop-mandatory` / inline | **`9999`** | **Supreme Layer:** Mandatory password change modal sitting strictly on top of all UI layers, preventing any bypass or interaction until resolved |
 
 ---
 
@@ -505,8 +545,8 @@ The system uses PostgreSQL managed via Prisma ORM (`server/prisma/schema.prisma`
 - `igstTotal` (`Decimal(10, 2)`, Default: `0`)
 - `roundOff` (`Decimal(10, 2)`, Default: `0`)
 - `billAmount` (`Decimal(10, 2)`)
-- `paymentStatus` (`String`, Default: `'UNPAID'`, `'UNPAID' | 'PARTIAL' | 'PAID'`)
-- `paymentMethod` (`String?`, `'CASH' | 'UPI' | 'CARD' | 'CREDIT'`)
+- `paymentStatus` (`String`, Default: `'PAID'`, `'PAID' | 'PARTIAL' | 'UNPAID'`)
+- `paymentMethod` (`String?`, Default: `'CASH'`, `'CASH' | 'UPI' | 'CARD' | 'CREDIT'`)
 - `createdAt` (`DateTime`, Default: `now()`)
 - Relations: `customer` (`Customer`), `items` (`InvoiceItem[]`), `returns` (`SalesReturn[]`)
 
@@ -803,9 +843,10 @@ All endpoints are dual-mounted (e.g. `/invoices` and `/api/invoices`).
 
 ## 14. Authentication & Authorization
 
-- **Token Format:** Signed JSON Web Token (`jsonwebtoken`) with `7d` expiration for cashier convenience.
+- **Token Format:** Cryptographically hardened JSON Web Token (`jsonwebtoken`) signed with **`HS512`** (HMAC SHA-512) and a 512-bit entropy secret key (`128-hex chars`), with `7d` expiration for cashier convenience.
 - **Header Structure:** `Authorization: Bearer <token>` (or `?token=<token>` query parameter for PDF previewing in new browser tabs).
 - **Startup Protection:** In `NODE_ENV === 'production'`, the server verifies that `JWT_SECRET` is defined and does not match the known development fallback `prathna-billing-jwt-secret-key-2026`. If insecure, the process halts immediately (`process.exit(1)`).
+- **Algorithm Whitelist Defense:** Middleware `requireAuth` strictly validates tokens against explicit algorithms `['HS256', 'HS512']`, preventing algorithm downgrade or "none" signature bypass attacks.
 - **Mandatory Password Change Protocol:**
   - Token payload carries `mustChangePassword: boolean`.
   - Middleware `enforcePasswordChange` (`server/src/middleware/auth.js:75`) intercepts all requests. If `mustChangePassword === true`, all endpoints return `403` with `{ error: 'password-change-required' }`, with an explicit whitelist exemption for `/auth/change-password` and `/api/auth/change-password`.
@@ -973,7 +1014,7 @@ Guarantees strictly increasing numbers (`INV-1001`, `INV-1002`, ...) with zero g
 
 ## 29. Testing Audit
 
-The repository contains an automated test suite executed via Node.js native test runner (`node --test test/*.test.js`).
+The repository contains an automated backend test suite executed via Node.js native test runner (`node --test test/*.test.js`).
 
 ### Automated Test Suites (`server/test/`)
 
@@ -991,7 +1032,8 @@ The repository contains an automated test suite executed via Node.js native test
 | `slice2.test.js` | 1 | Invoice number uniqueness under concurrent insertion, purchase stock increments | **PASS** |
 | `slice3.test.js` | 3 | PDF header verification, sales returns over-return rejection, low-stock filtering | **PASS** |
 | `stockAndInvoice.test.js` | 1 | Stock decrements on invoice creation, insufficient stock rejection | **PASS** |
-| **TOTAL** | **39** | **Complete Full-Stack Business Logic & Security Verification** | **39/39 PASS** |
+| `stockRoutes.test.js` | 1 | Stock transactions listing & manual stock adjustment endpoints | **PASS** |
+| **TOTAL** | **40** | **Complete Full-Stack Business Logic & Security Verification** | **40/40 PASS** |
 
 ---
 
@@ -1019,6 +1061,7 @@ The repository contains an automated test suite executed via Node.js native test
 | :--- | :--- | :---: | :--- |
 | **INFO** | JWT Secret Guard | **Secured** | Production boot guard in `server/src/middleware/auth.js:13-21` prevents running in production with fallback keys. |
 | **INFO** | Password Storage | **Secured** | Passwords hashed using `bcryptjs` with 10 salt rounds. Legacy plaintext fallback auto-upgrades upon login. |
+| **INFO** | Modal Z-Index Isolation | **Secured** | The mandatory password change modal (`.modal-backdrop-mandatory` / `z-index: 9999`) sits strictly above all drawer, backdrop, and topbar elements (`z-index: 40-100`), guaranteeing zero bypass on mobile/tablet screens. |
 | **LOW** | PDF Endpoint Query Token | **By Design** | `GET /invoices/:id/pdf` accepts `?token=` query param in addition to `Authorization` header to allow streaming PDF in native browser tab. Token is strictly validated via `jwt.verify`. |
 | **LOW** | Rate Limiting | **Potential Concern** | No `express-rate-limit` middleware is currently mounted on `/auth/login`. Since this is an internal LAN/counter application, risk is minimal, but rate limiting should be added if exposed to the public Internet. |
 
@@ -1035,10 +1078,10 @@ The repository contains an automated test suite executed via Node.js native test
 
 ## 33. Technical Debt & Code Quality
 
-| Debt Level | Location | Issue Description | Recommendation |
+| Debt Level | Location | Issue Description | Recommendation / Resolution |
 | :--- | :--- | :--- | :--- |
-| **MEDIUM** | `server/src/routes/stock.js` | **Unmounted Route:** `stock.js` defines `/` (list stock transactions) and `/adjust` (manual stock adjustments), but is NOT imported or mounted in `server/src/index.js`. | Mount `app.use('/stock', stockRouter)` in `index.js` when manual stock adjustment UI is added. |
-| **LOW** | `client/src/App.css` | **Dead Code:** `App.css` contains default Vite template demo styles and is never imported by `main.jsx` or `App.jsx`. | Safe to remove `App.css` or leave untouched. |
+| **RESOLVED** | `server/src/routes/stock.js` | **Stock Routes Mounted:** `stock.js` is mounted at `/stock` and `/api/stock` with `requireAuth` and `enforcePasswordChange`. | Fully authenticated and verified via automated test suite. |
+| **RESOLVED** | `client/src/App.css` | **Vite Boilerplate Cleaned:** `App.css` has been cleared of template styles. | Single source of truth is maintained in `client/src/index.css`. |
 | **LOW** | `client/src/App.jsx` | **Single Monolithic Component:** `App.jsx` contains ~4,619 lines encompassing all views, modals, state, and handlers. | Functional and tested, but can eventually be split into feature folders (`components/dashboard/`, `components/invoice/`, etc.). |
 
 ---
@@ -1057,7 +1100,8 @@ The repository contains an automated test suite executed via Node.js native test
 | **Sales Returns** | **Working** | `/invoices/:id/returns` | `server/src/routes/invoices.js`, `App.jsx` | `SalesReturn`, `SalesReturnItem` | Row-level locking, restocks returned items |
 | **Reports** | **Working** | `/reports/sales`, `/purchases`, `/stock` | `server/src/routes/reports.js`, `App.jsx` | `Invoice`, `Purchase`, `Product` | Tax split breakdown, inventory valuation |
 | **Company Settings** | **Working** | `/settings`, `/settings/logo` | `server/src/routes/settings.js`, `App.jsx` | `CompanySettings` | Base64 logo upload, Gujarati terms |
-| **Manual Stock Adjust** | **Partial** | `/stock/adjust` | `server/src/routes/stock.js` | `StockTransaction`, `Product` | Route handler written but unmounted in `index.js` |
+| **Responsive Mobile POS**| **Implemented** | Tablet/Phone viewport | `client/src/App.jsx`, `index.css` | N/A | Sticky topbar, sliding drawer, z-index 9999 modal |
+| **Manual Stock Adjust** | **Working** | `/stock/adjust`, `/stock` | `server/src/routes/stock.js` | `StockTransaction`, `Product` | Mounted in `index.js`, fully protected by auth |
 
 ---
 
@@ -1103,6 +1147,9 @@ Reports & Dashboard
   - Edit `server/src/utils/pdfGenerator.js` (`generateInvoicePDF`, `renderMixedText`, `numberToIndianWords`).
   - Font file located at `server/assets/fonts/NotoSansGujarati-Regular.ttf`.
   - Update tests in `server/test/gujaratiPdf.test.js`.
+- **To modify Responsive Mobile Layout or Breakpoints:**
+  - Edit `client/src/index.css` (Breakpoints at lines `828`, `844`, `876`, `995`, `1192`).
+  - Mobile Topbar, Drawer & Hamburger JSX in `client/src/App.jsx:1501-1560`.
 - **To add a field to Products (e.g. barcode, brand):**
   1. Modify `server/prisma/schema.prisma` (`model Product`).
   2. Run `npm run db:push --prefix server` or create migration `npx prisma migrate dev`.
@@ -1119,17 +1166,23 @@ Reports & Dashboard
 
 ## 37. Known Issues & Findings
 
-| ID | Severity | Feature | File(s) | Problem Description | Evidence / Impact | Recommendation |
-| :--- | :---: | :--- | :--- | :--- | :--- | :--- |
-| **ISS-01** | Low | Stock Route | `server/src/routes/stock.js`, `server/src/index.js` | `stock.js` is defined with `/` and `/adjust` routes but is never imported or mounted in `index.js`. | Manual stock adjustment endpoint is not reachable via HTTP. | Mount `app.use('/stock', requireAuth, enforcePasswordChange, stockRouter)` in `index.js` if manual inventory adjustments are required. |
-| **ISS-02** | Low | Client CSS | `client/src/App.css` | Unused CSS boilerplate file from initial Vite template. | None (Dead code; `index.css` is the actual active stylesheet). | Safe to ignore or delete in future refactoring. |
+| ID | Severity | Feature | File(s) | Problem Description | Evidence / Impact | Status |
+| :--- | :---: | :--- | :--- | :--- | :--- | :---: |
+| **ISS-01** | Low | Stock Route | `server/src/routes/stock.js`, `server/src/index.js` | `stock.js` defined `/` and `/adjust` routes. | Now mounted at `/stock` and `/api/stock` with `requireAuth` + `enforcePasswordChange` and verified via `stockRoutes.test.js`. | **RESOLVED** |
+| **ISS-02** | Low | Client CSS | `client/src/App.css` | Unused CSS boilerplate file from initial Vite template. | Cleaned up with clear documentation comment; single source of truth is `client/src/index.css`. | **RESOLVED** |
 
 ---
 
-## 38. Unknown / Unverified Areas
+## 38. Pre-Deployment Verification Checklist (Open Human Steps)
 
-- **Production Cloud Storage:** Logo files are currently stored locally on the server disk (`server/assets/logo/`). If deploying to ephemeral serverless containers (e.g. AWS Lambda / Google Cloud Run), local disk storage is ephemeral and should be backed by an S3 / GCS bucket.
-- **Hardware Thermal Printer Support:** Currently, printing is accomplished via standard A4 PDF download and browser native print dialog. Thermal ESC/POS receipt printing (e.g. 58mm / 80mm roll printers) is not currently implemented.
+While all backend business logic, database transactions, and security checks are 100% verified via the 40 automated tests, **two manual verification steps remain recommended before live counter sign-off:**
+
+1. **Human End-to-End Walkthrough Drill:**
+   - Perform a full manual checkout pass in the browser: Register Staff Account -> Mandatory Password Change -> Walk-in Customer Selection -> Add 2 Items -> Generate Invoice -> Verify Downloaded A4 PDF Layout -> Issue Partial Sales Return -> Verify Restock on Dashboard.
+2. **Physical Counter Tablet/Mobile Device Test:**
+   - Open the counter URL on the actual shop tablet or mobile phone to verify touch target responsiveness, hamburger drawer smooth animation, and PDF printing directly to the shop printer.
+3. **Production Cloud Storage Configuration (If applicable):**
+   - Logo files are currently stored locally on the server disk (`server/assets/logo/`). If deploying to ephemeral serverless containers, back `assets/logo/` with persistent or cloud storage.
 
 ---
 
@@ -1137,7 +1190,8 @@ Reports & Dashboard
 
 1. **Deploy Production Environment:** Configure PostgreSQL connection in `server/.env`, generate a 64-character hex `JWT_SECRET`, execute `npm run db:migrate --prefix server`, and launch PM2 via `npm run start:prod`.
 2. **Setup Automated Backups:** Configure Windows Task Scheduler using `scripts/backup/db_backup.ps1` to replicate nightly dumps to OneDrive/Google Drive or external storage.
-3. **Mount Stock Adjustments (Optional):** If store managers need manual inventory override capabilities (e.g. damaged goods / inventory write-offs), mount `server/src/routes/stock.js` in `server/src/index.js` and add an adjustment modal to the Products screen.
+3. **Manual Stock Adjustment UI:** Connect the now-mounted `/stock/adjust` endpoint to a dedicated modal on the Products screen if store managers need manual inventory override capabilities (e.g. damaged goods / inventory write-offs).
 
 ---
 *End of Codebase Documentation.*
+

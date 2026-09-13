@@ -43,7 +43,7 @@ export function requireAuth(req, res, next) {
       });
     }
 
-    const decoded = jwt.verify(token, JWT_SECRET);
+    const decoded = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256', 'HS512'] });
     req.user = decoded;
     next();
   } catch (error) {

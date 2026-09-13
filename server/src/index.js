@@ -13,6 +13,7 @@ import purchasesRouter from './routes/purchases.js';
 import settingsRouter from './routes/settings.js';
 import dashboardRouter from './routes/dashboard.js';
 import reportsRouter from './routes/reports.js';
+import stockRouter from './routes/stock.js';
 
 import authRouter from './routes/auth.js';
 import { requireAuth, enforcePasswordChange } from './middleware/auth.js';
@@ -80,6 +81,10 @@ app.use('/api/dashboard', requireAuth, enforcePasswordChange, dashboardRouter);
 app.use('/reports', requireAuth, enforcePasswordChange, reportsRouter);
 app.use('/api/reports', requireAuth, enforcePasswordChange, reportsRouter);
 
+// Stock Transactions & Adjustments
+app.use('/stock', requireAuth, enforcePasswordChange, stockRouter);
+app.use('/api/stock', requireAuth, enforcePasswordChange, stockRouter);
+
 // Global Error Handler
 app.use((err, req, res, next) => {
   console.error('Unhandled server error:', err);
@@ -90,7 +95,7 @@ app.use((err, req, res, next) => {
 
 if (process.env.NODE_ENV !== 'test') {
   app.listen(PORT, () => {
-    console.log(`🚀 Billing Server running on http://localhost:${PORT}`);
+    console.log(`Billing Server running on http://localhost:${PORT}`);
   });
 }
 

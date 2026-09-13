@@ -63,8 +63,8 @@ model Invoice {
   roundOff     Decimal @default(0) @db.Decimal(10, 2)
   billAmount   Decimal @db.Decimal(10, 2)
 
-  paymentStatus String  @default("UNPAID") // UNPAID | PARTIAL | PAID
-  paymentMethod String? // CASH | UPI | CARD | CREDIT
+  paymentStatus String  @default("PAID") // UNPAID | PARTIAL | PAID
+  paymentMethod String? @default("CASH") // CASH | UPI | CARD | CREDIT
 
   createdAt DateTime @default(now())
 

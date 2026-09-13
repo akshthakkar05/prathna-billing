@@ -267,6 +267,7 @@ export default function App() {
   const [itemRate, setItemRate] = useState('');
   const [creatingInvoice, setCreatingInvoice] = useState(false);
   const [savedInvoiceJSON, setSavedInvoiceJSON] = useState(null);
+  const [invoicePaymentMethod, setInvoicePaymentMethod] = useState('CASH');
 
   // Settings state
   const [savingSettings, setSavingSettings] = useState(false);
@@ -1215,6 +1216,8 @@ export default function App() {
       const payload = {
         customerId: selectedCustomerId,
         taxType: invoiceTaxType,
+        paymentStatus: invoicePaymentMethod === 'CREDIT' ? 'UNPAID' : 'PAID',
+        paymentMethod: invoicePaymentMethod,
         items: invoiceItems.map((item) => ({
           productId: item.productId,
           qty: item.qty,
@@ -1242,6 +1245,7 @@ export default function App() {
       setSavedInvoiceJSON(data);
       setInvoices((prev) => [data, ...prev]);
       setInvoiceItems([]);
+      setInvoicePaymentMethod('CASH');
       await loadData();
     } catch (err) {
       showToast(err.message, 'error');
@@ -2632,6 +2636,51 @@ export default function App() {
                           <span style={{ fontSize: '1.375rem', fontWeight: 700, color: 'var(--primary)' }}>₹{liveTotals.billAmount}</span>
                         </div>
                       </div>
+                    </div>
+                  )}
+
+                  {/* Step 5: Payment Method Selector */}
+                  {invoiceItems.length > 0 && (
+                    <div style={{ marginBottom: '18px' }}>
+                      <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 600, marginBottom: '8px', color: 'var(--text-primary)' }}>
+                        Payment Method:
+                      </label>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px' }}>
+                        {[
+                          { id: 'CASH', label: 'Cash' },
+                          { id: 'UPI', label: 'UPI' },
+                          { id: 'CARD', label: 'Card' },
+                          { id: 'CREDIT', label: 'Credit' },
+                        ].map((m) => {
+                          const isSelected = invoicePaymentMethod === m.id;
+                          return (
+                            <button
+                              key={m.id}
+                              type="button"
+                              onClick={() => setInvoicePaymentMethod(m.id)}
+                              style={{
+                                padding: '10px 8px',
+                                borderRadius: 'var(--radius)',
+                                border: isSelected ? '2px solid var(--primary)' : '1px solid var(--border)',
+                                background: isSelected ? 'rgba(37, 99, 235, 0.08)' : 'var(--bg-card)',
+                                color: isSelected ? 'var(--primary)' : 'var(--text-secondary)',
+                                fontWeight: isSelected ? 700 : 500,
+                                fontSize: '0.875rem',
+                                cursor: 'pointer',
+                                textAlign: 'center',
+                                transition: 'all 0.15s ease',
+                              }}
+                            >
+                              {m.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {invoicePaymentMethod === 'CREDIT' && (
+                        <p style={{ margin: '8px 0 0 0', fontSize: '0.75rem', color: '#D97706', fontWeight: 500 }}>
+                          Credit sale: Invoice will be marked as UNPAID in records.
+                        </p>
+                      )}
                     </div>
                   )}
 

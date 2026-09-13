@@ -173,8 +173,8 @@ router.post('/', async (req, res) => {
       customerId,
       invoiceNumber: customInvoiceNumber,
       invoiceDate,
-      paymentStatus = 'UNPAID',
-      paymentMethod = null,
+      paymentStatus = 'PAID',
+      paymentMethod = 'CASH',
       taxType: requestedTaxType,
       items, // array of { productId, qty, rate? }
     } = req.body;
