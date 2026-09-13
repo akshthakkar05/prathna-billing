@@ -70,7 +70,6 @@ async function setupRealProducts() {
   await prisma.customer.create({
     data: {
       name: 'Walk-in (Cash)',
-      mobile: '9999999999',
       address: 'Ahmedabad, Gujarat',
       state: '24',
     },
@@ -86,7 +85,7 @@ async function setupRealProducts() {
       unit: 'PCS',
       sellingPrice: 200.0,
       purchasePrice: 0.0,
-      currentStock: 0.0,
+      currentStock: 80.0,
       minStockLevel: 0.0,
     },
     {

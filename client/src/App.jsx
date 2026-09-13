@@ -28,6 +28,7 @@ import {
   TrendingUp,
   Users,
   Zap,
+  Edit2,
 } from 'lucide-react';
 
 // Reference map of all 37 Indian GST State/UT codes
@@ -204,6 +205,8 @@ export default function App() {
     minStockLevel: '10',
   });
   const [creatingProduct, setCreatingProduct] = useState(false);
+  const [editingProduct, setEditingProduct] = useState(null);
+  const [updatingProduct, setUpdatingProduct] = useState(false);
 
   // Form: Create Customer
   const [customerForm, setCustomerForm] = useState({
@@ -745,6 +748,45 @@ export default function App() {
       showToast(err.message, 'error');
     } finally {
       setCreatingProduct(false);
+    }
+  };
+
+  const handleUpdateProduct = async (e) => {
+    e.preventDefault();
+    if (!editingProduct) return;
+    if (!editingProduct.name || !editingProduct.hsnCode || editingProduct.sellingPrice === '') {
+      showToast('Please fill all required product fields', 'error');
+      return;
+    }
+
+    setUpdatingProduct(true);
+    try {
+      const res = await authFetch(`/products/${editingProduct.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: editingProduct.name,
+          sku: editingProduct.sku,
+          hsnCode: editingProduct.hsnCode,
+          gstRate: editingProduct.gstRate,
+          purchasePrice: editingProduct.purchasePrice || 0,
+          sellingPrice: editingProduct.sellingPrice,
+          currentStock: editingProduct.currentStock,
+          minStockLevel: editingProduct.minStockLevel || 0,
+          unit: editingProduct.unit || 'PCS',
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to update product');
+
+      showToast(`Product "${data.name}" updated successfully!`, 'success');
+      setEditingProduct(null);
+      await loadData();
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setUpdatingProduct(false);
     }
   };
 
@@ -3496,6 +3538,7 @@ export default function App() {
                         <th style={{ textAlign: 'right' }}>Cost</th>
                         <th style={{ textAlign: 'right' }}>Selling Price</th>
                         <th style={{ textAlign: 'right' }}>Current Stock</th>
+                        <th style={{ textAlign: 'center' }}>Action</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -3506,12 +3549,30 @@ export default function App() {
                             <td style={{ fontWeight: 600 }}>{p.name}</td>
                             <td>{p.hsnCode}</td>
                             <td>{p.gstRate}%</td>
-                            <td style={{ textAlign: 'right' }}>₹{Number(p.purchasePrice).toFixed(2)}</td>
+                            <td style={{ textAlign: 'right' }}>₹{Number(p.purchasePrice || 0).toFixed(2)}</td>
                             <td style={{ textAlign: 'right', fontWeight: 600 }}>₹{Number(p.sellingPrice).toFixed(2)}</td>
                             <td style={{ textAlign: 'right' }}>
                               <span className={`badge ${isLow ? 'badge-warning' : 'badge-neutral'}`}>
                                 {Number(p.currentStock)} {p.unit}
                               </span>
+                            </td>
+                            <td style={{ textAlign: 'center' }}>
+                              <button
+                                type="button"
+                                className="btn btn-secondary btn-sm"
+                                style={{ padding: '4px 10px', fontSize: '0.75rem', height: '28px' }}
+                                onClick={() =>
+                                  setEditingProduct({
+                                    ...p,
+                                    purchasePrice: p.purchasePrice !== undefined && p.purchasePrice !== null ? String(p.purchasePrice) : '',
+                                    sellingPrice: p.sellingPrice !== undefined && p.sellingPrice !== null ? String(p.sellingPrice) : '',
+                                    currentStock: p.currentStock !== undefined && p.currentStock !== null ? String(p.currentStock) : '0',
+                                    minStockLevel: p.minStockLevel !== undefined && p.minStockLevel !== null ? String(p.minStockLevel) : '0',
+                                  })
+                                }
+                              >
+                                <Edit2 size={13} style={{ marginRight: '4px' }} /> Edit
+                              </button>
                             </td>
                           </tr>
                         );
@@ -4041,13 +4102,15 @@ export default function App() {
                           ) : (
                             productsList.map((p) => {
                               const isLow = Number(p.currentStock) <= Number(p.minStockLevel || 0);
-                              const valuation = p.lineValuation ?? p.stockValue ?? (Number(p.currentStock) * Number(p.purchasePrice || 0));
+                              const buyRate = Number(p.purchasePrice || 0);
+                              const sellRate = Number(p.sellingPrice || 0);
+                              const valuation = p.lineValuation ?? p.stockValue ?? (Number(p.currentStock) * buyRate);
                               return (
                                 <tr key={p.id}>
                                   <td style={{ fontWeight: 600 }}>{p.name}</td>
                                   <td>{p.hsnCode || '-'}</td>
-                                  <td style={{ textAlign: 'right' }}>₹{Number(p.purchasePrice || 0).toFixed(2)}</td>
-                                  <td style={{ textAlign: 'right' }}>₹{Number(p.sellingPrice || 0).toFixed(2)}</td>
+                                  <td style={{ textAlign: 'right' }}>₹{buyRate.toFixed(2)}</td>
+                                  <td style={{ textAlign: 'right' }}>₹{sellRate.toFixed(2)}</td>
                                   <td style={{ textAlign: 'right' }}>
                                     <span className={`badge ${isLow ? 'badge-warning' : 'badge-neutral'}`}>
                                       {Number(p.currentStock)} {p.unit || 'PCS'}
@@ -4654,6 +4717,148 @@ export default function App() {
                   {savingQuickSupp ? 'Saving Supplier...' : (
                     <>
                       <CheckCircle2 size={16} /> Save & Select
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: EDIT PRODUCT */}
+      {/* ========================================================================= */}
+      {editingProduct && (
+        <div className="modal-backdrop">
+          <div className="modal-content" style={{ maxWidth: '560px' }}>
+            <div className="modal-header">
+              <div>
+                <div className="modal-title">Edit Product Details</div>
+                <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                  Update pricing, tax rate, or inventory details
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setEditingProduct(null)}
+                style={{ border: 'none' }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdateProduct}>
+              <div className="form-group" style={{ marginBottom: '12px' }}>
+                <label className="form-label">Product / Service Name</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  value={editingProduct.name || ''}
+                  onChange={(e) => setEditingProduct({ ...editingProduct, name: e.target.value })}
+                  required
+                />
+              </div>
+
+              <div className="form-grid-2">
+                <div className="form-group" style={{ marginBottom: '12px' }}>
+                  <label className="form-label">HSN/SAC Code</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={editingProduct.hsnCode || ''}
+                    onChange={(e) => setEditingProduct({ ...editingProduct, hsnCode: e.target.value })}
+                    required
+                  />
+                </div>
+
+                <div className="form-group" style={{ marginBottom: '12px' }}>
+                  <label className="form-label">GST Tax Rate (%)</label>
+                  <select
+                    className="form-select"
+                    value={String(Number(editingProduct.gstRate).toFixed(2))}
+                    onChange={(e) => setEditingProduct({ ...editingProduct, gstRate: e.target.value })}
+                  >
+                    <option value="0.00">0% (Nil)</option>
+                    <option value="5.00">5%</option>
+                    <option value="12.00">12%</option>
+                    <option value="18.00">18% (Standard)</option>
+                    <option value="28.00">28%</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="form-grid-2">
+                <div className="form-group" style={{ marginBottom: '12px' }}>
+                  <label className="form-label">Cost Price / Purchase Rate (₹)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="form-input"
+                    value={editingProduct.purchasePrice !== undefined ? editingProduct.purchasePrice : ''}
+                    onChange={(e) => setEditingProduct({ ...editingProduct, purchasePrice: e.target.value })}
+                    placeholder="Cost (e.g. 150.00)"
+                    required
+                  />
+                  <span className="form-hint">Used to calculate stock valuation</span>
+                </div>
+
+                <div className="form-group" style={{ marginBottom: '12px' }}>
+                  <label className="form-label">Selling Price / MRP (₹)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="form-input"
+                    value={editingProduct.sellingPrice !== undefined ? editingProduct.sellingPrice : ''}
+                    onChange={(e) => setEditingProduct({ ...editingProduct, sellingPrice: e.target.value })}
+                    placeholder="MRP (e.g. 200.00)"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="form-grid-2">
+                <div className="form-group" style={{ marginBottom: '16px' }}>
+                  <label className="form-label">Current Stock Count</label>
+                  <input
+                    type="number"
+                    className="form-input"
+                    value={editingProduct.currentStock !== undefined ? editingProduct.currentStock : ''}
+                    onChange={(e) => setEditingProduct({ ...editingProduct, currentStock: e.target.value })}
+                    required
+                  />
+                </div>
+
+                <div className="form-group" style={{ marginBottom: '16px' }}>
+                  <label className="form-label">Min Stock Alert Level</label>
+                  <input
+                    type="number"
+                    className="form-input"
+                    value={editingProduct.minStockLevel !== undefined ? editingProduct.minStockLevel : '0'}
+                    onChange={(e) => setEditingProduct({ ...editingProduct, minStockLevel: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '16px' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  disabled={updatingProduct}
+                  onClick={() => setEditingProduct(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={updatingProduct}
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                >
+                  {updatingProduct ? 'Saving changes...' : (
+                    <>
+                      <CheckCircle2 size={16} /> Save Product Changes
                     </>
                   )}
                 </button>

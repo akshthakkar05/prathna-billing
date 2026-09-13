@@ -159,8 +159,7 @@ router.get('/summary', async (req, res) => {
       const stock = new Decimal(prod.currentStock);
       const buyPrice = new Decimal(prod.purchasePrice);
       const sellPrice = new Decimal(prod.sellingPrice);
-      const minStock = new Decimal(prod.minStockLevel);
-
+      const minStock = new Decimal(prod.minStockLevel || 0);
       const val = stock.mul(buyPrice).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
       totalStockValue = totalStockValue.plus(val);
 

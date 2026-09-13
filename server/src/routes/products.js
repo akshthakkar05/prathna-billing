@@ -85,4 +85,60 @@ router.post('/', async (req, res) => {
   }
 });
 
+// PUT /products/:id - Update Product
+router.put('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      name,
+      sku,
+      hsnCode,
+      gstRate,
+      purchasePrice,
+      sellingPrice,
+      currentStock,
+      minStockLevel,
+      unit,
+      isActive,
+    } = req.body;
+
+    const dataToUpdate = {};
+    if (name !== undefined) dataToUpdate.name = name.trim();
+    if (sku !== undefined) dataToUpdate.sku = sku ? sku.trim() : null;
+    if (hsnCode !== undefined) dataToUpdate.hsnCode = String(hsnCode).trim();
+    if (gstRate !== undefined) dataToUpdate.gstRate = new Decimal(gstRate);
+    if (purchasePrice !== undefined) dataToUpdate.purchasePrice = new Decimal(purchasePrice);
+    if (sellingPrice !== undefined) dataToUpdate.sellingPrice = new Decimal(sellingPrice);
+    if (currentStock !== undefined) dataToUpdate.currentStock = new Decimal(currentStock);
+    if (minStockLevel !== undefined) dataToUpdate.minStockLevel = new Decimal(minStockLevel);
+    if (unit !== undefined) dataToUpdate.unit = unit || 'PCS';
+    if (isActive !== undefined) dataToUpdate.isActive = Boolean(isActive);
+
+    const updated = await prisma.product.update({
+      where: { id },
+      data: dataToUpdate,
+    });
+
+    res.json(updated);
+  } catch (error) {
+    console.error('Error updating product:', error);
+    res.status(500).json({ error: 'Failed to update product', details: error.message });
+  }
+});
+
+// DELETE /products/:id - Soft Delete / Deactivate Product
+router.delete('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updated = await prisma.product.update({
+      where: { id },
+      data: { isActive: false },
+    });
+    res.json({ message: 'Product deactivated successfully', product: updated });
+  } catch (error) {
+    console.error('Error deactivating product:', error);
+    res.status(500).json({ error: 'Failed to deactivate product', details: error.message });
+  }
+});
+
 export default router;

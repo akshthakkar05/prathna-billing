@@ -40,9 +40,9 @@ test('Invoice number uniqueness under concurrent creation (atomic sequential gen
 });
 
 // -------------------------------------------------------------
-// TEST 2: Purchase correctly increases stock via transaction row
+// TEST 2: Purchase correctly increases stock via transaction row and updates purchasePrice (weighted average)
 // -------------------------------------------------------------
-test('Purchase correctly increases stock via a stock_transaction row without modifying purchasePrice', async () => {
+test('Purchase correctly increases stock via a stock_transaction row and updates purchasePrice (weighted average)', async () => {
   const uniqueSuffix = Date.now().toString().slice(-6);
 
   // 1. Create Supplier
@@ -56,7 +56,7 @@ test('Purchase correctly increases stock via a stock_transaction row without mod
     },
   });
 
-  // 2. Create Product with 5 units opening stock
+  // 2. Create Product with 5 units opening stock @ 220.00
   const originalPurchasePrice = new Decimal('220.00');
   const product = await prisma.$transaction(async (tx) => {
     const p = await tx.product.create({
@@ -98,13 +98,19 @@ test('Purchase correctly increases stock via a stock_transaction row without mod
     const gstAmt = taxable.mul(purchaseGstRate).div(new Decimal(100)).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
     const lineAmount = taxable.plus(gstAmt).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
 
-    // Increase product stock (do NOT auto-touch purchasePrice per client decision)
+    // Compute weighted average: ((5 * 220) + (12 * 240)) / (5 + 12) = 3980 / 17 = 234.12
+    const currentStockBefore = new Decimal(product.currentStock);
+    const currentPurchasePrice = new Decimal(product.purchasePrice);
+    const weightedAvg = currentStockBefore.mul(currentPurchasePrice).plus(purchaseQty.mul(purchaseRate)).div(currentStockBefore.plus(purchaseQty)).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+
+    // Increase product stock & update purchasePrice
     await tx.product.update({
       where: { id: product.id },
       data: {
         currentStock: {
           increment: purchaseQty,
         },
+        purchasePrice: weightedAvg,
       },
     });
 
@@ -152,11 +158,11 @@ test('Purchase correctly increases stock via a stock_transaction row without mod
     'Product stock should increase by 12 from 5 to 17'
   );
 
-  // Verify purchasePrice was NOT modified automatically
+  // Verify purchasePrice was updated to weighted average: 234.12
   assert.equal(
     productAfterPurchase.purchasePrice.toString(),
-    '220',
-    'purchasePrice must not be automatically overwritten by purchase'
+    '234.12',
+    'purchasePrice must be updated to weighted average (234.12)'
   );
 
   // Verify stock_transaction row of type PURCHASE

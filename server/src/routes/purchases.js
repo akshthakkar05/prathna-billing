@@ -131,13 +131,28 @@ router.post('/', async (req, res) => {
           amount: lineAmount,
         });
 
-        // Increase product stock (do NOT auto-touch purchasePrice per decision)
+        // Auto-update Product.purchasePrice using weighted average cost
+        const currentStockBefore = new Decimal(product.currentStock);
+        const currentPurchasePrice = new Decimal(product.purchasePrice);
+
+        let newPurchasePrice;
+        if (currentStockBefore.lessThanOrEqualTo(0)) {
+          newPurchasePrice = rate.toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+        } else {
+          const totalExistingValue = currentStockBefore.mul(currentPurchasePrice);
+          const totalNewValue = qty.mul(rate);
+          const totalQty = currentStockBefore.plus(qty);
+          newPurchasePrice = totalExistingValue.plus(totalNewValue).div(totalQty).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+        }
+
+        const newStock = currentStockBefore.plus(qty);
+
+        // Update product stock and weighted purchasePrice (sellingPrice remains untouched)
         await tx.product.update({
           where: { id: product.id },
           data: {
-            currentStock: {
-              increment: qty,
-            },
+            currentStock: newStock,
+            purchasePrice: newPurchasePrice,
           },
         });
 
