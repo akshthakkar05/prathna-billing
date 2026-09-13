@@ -19,11 +19,15 @@ async function setupRealProducts() {
   await prisma.stockTransaction.deleteMany({});
   console.log('✅ Removed stock transactions');
 
-  // 2. Remove all old demo/placeholder/test products
+  // 2. Remove test suppliers
+  await prisma.supplier.deleteMany({});
+  console.log('✅ Removed test suppliers');
+
+  // 3. Remove all old demo/placeholder/test products
   await prisma.product.deleteMany({});
   console.log('✅ Removed placeholder/test products');
 
-  // 3. Clean test customers (customers created during tests with timestamps or 'Customer' in name)
+  // 4. Clean test customers (customers created during tests with timestamps or 'Customer' in name)
   await prisma.customer.deleteMany({});
   console.log('✅ Cleaned test customers');
 
@@ -66,6 +70,7 @@ async function setupRealProducts() {
       data: {
         name: 'Prathna Enterprises',
         gstin: company.gstin || '24AAACP9988P1Z8',
+        logoUrl: company.logoUrl || '/assets/logo/prathna-logo.png',
       },
     });
   }

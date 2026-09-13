@@ -199,20 +199,52 @@ export function generateInvoicePDF(invoice, company, options = {}) {
       // ==========================================
       doc.rect(36, 36, contentWidth, 80).fill('#0f172a');
 
-      // Company Title in Header
-      doc.fillColor('#ffffff').fontSize(16).font('Helvetica-Bold');
-      doc.text(compName.toUpperCase(), 50, 48);
-
-      doc.fillColor('#94a3b8').fontSize(8.5).font('Helvetica');
-      if (compAddress) {
-        doc.text(compAddress, 50, 70, { width: 300 });
+      // Resolve logo file if present
+      let hasRenderedLogo = false;
+      if (company?.logoUrl) {
+        try {
+          const cleanUrl = company.logoUrl.split('?')[0];
+          const relPath = cleanUrl.replace(/^\/?(api\/)?/, '');
+          const resolvedLogoPath = path.resolve(__dirname, '../../', relPath);
+          if (fs.existsSync(resolvedLogoPath)) {
+            // Render logo graphic (fits neatly in header height)
+            doc.image(resolvedLogoPath, 48, 42, { fit: [74, 68] });
+            hasRenderedLogo = true;
+          }
+        } catch (logoErr) {
+          console.error('Error rendering logo in PDF, falling back to text:', logoErr);
+          hasRenderedLogo = false;
+        }
       }
+
       const headerMeta = [];
       if (compPhone) headerMeta.push(`Phone: ${compPhone}`);
       if (compGstin) headerMeta.push(`GSTIN: ${compGstin}`);
       if (compPan) headerMeta.push(`PAN: ${compPan}`);
-      if (headerMeta.length > 0) {
-        doc.text(headerMeta.join(' | '), 50, compAddress ? 92 : 75);
+
+      if (hasRenderedLogo) {
+        // Since logo already contains "PRATHNA ENTERPRISES", suppress duplicate title text
+        // and place address / GSTIN / PAN alongside the logo
+        if (compAddress) {
+          doc.fillColor('#e2e8f0').fontSize(8.5).font('Helvetica');
+          doc.text(compAddress, 132, 50, { width: 225 });
+        }
+        if (headerMeta.length > 0) {
+          doc.fillColor('#94a3b8').fontSize(8).font('Helvetica');
+          doc.text(headerMeta.join(' | '), 132, compAddress ? 74 : 56, { width: 225 });
+        }
+      } else {
+        // Fallback: Text-only header matching existing layout
+        doc.fillColor('#ffffff').fontSize(16).font('Helvetica-Bold');
+        doc.text(compName.toUpperCase(), 50, 48);
+
+        doc.fillColor('#94a3b8').fontSize(8.5).font('Helvetica');
+        if (compAddress) {
+          doc.text(compAddress, 50, 70, { width: 300 });
+        }
+        if (headerMeta.length > 0) {
+          doc.text(headerMeta.join(' | '), 50, compAddress ? 92 : 75);
+        }
       }
 
       // Tax Invoice & Copy Badge on the right

@@ -1,6 +1,8 @@
 import express from 'express';
 import cors from 'cors';
 import morgan from 'morgan';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 
 import productsRouter from './routes/products.js';
@@ -17,13 +19,21 @@ import { requireAuth, enforcePasswordChange } from './middleware/auth.js';
 
 dotenv.config();
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const assetsDir = path.resolve(__dirname, '../assets');
+
 const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Middlewares
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 app.use(morgan('dev'));
+
+// Public Static Assets (Logos, fonts, etc. - unauthenticated)
+app.use('/assets', express.static(assetsDir));
+app.use('/api/assets', express.static(assetsDir));
 
 // Health check (public)
 app.get('/health', (req, res) => res.json({ status: 'ok', service: 'Billing V1, V2, V3 & Auth V4' }));

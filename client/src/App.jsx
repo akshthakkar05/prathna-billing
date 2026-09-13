@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Package,
   UserPlus,
@@ -21,6 +21,9 @@ import {
   LogOut,
   X,
   Lock,
+  Eye,
+  FileText,
+  Upload,
 } from 'lucide-react';
 
 // Reference map of all 37 Indian GST State/UT codes
@@ -92,6 +95,41 @@ function resolveCustomerStateCode(customer) {
   return null;
 }
 
+const VALID_TABS = ['dashboard', 'invoice', 'purchase', 'product', 'customer', 'supplier', 'reports', 'settings'];
+const VALID_REPORT_SUBTABS = ['sales', 'purchases', 'stock'];
+
+function getInitialNavigation() {
+  // 1. Check window.location.hash first (e.g. #reports/stock or #invoice)
+  try {
+    const rawHash = window.location.hash.replace(/^#\/?/, '').trim().toLowerCase();
+    if (rawHash) {
+      const parts = rawHash.split('/');
+      const tab = parts[0];
+      const subTab = parts[1];
+      if (VALID_TABS.includes(tab)) {
+        return {
+          tab,
+          reportSubTab: VALID_REPORT_SUBTABS.includes(subTab)
+            ? subTab
+            : (localStorage.getItem('prathna_report_sub_tab') || 'sales'),
+        };
+      }
+    }
+  } catch {}
+
+  // 2. Check localStorage fallback
+  try {
+    const savedTab = localStorage.getItem('prathna_active_tab');
+    const savedSubTab = localStorage.getItem('prathna_report_sub_tab');
+    return {
+      tab: VALID_TABS.includes(savedTab) ? savedTab : 'dashboard',
+      reportSubTab: VALID_REPORT_SUBTABS.includes(savedSubTab) ? savedSubTab : 'sales',
+    };
+  } catch {
+    return { tab: 'dashboard', reportSubTab: 'sales' };
+  }
+}
+
 export default function App() {
   // Authentication State
   const [token, setToken] = useState(() => localStorage.getItem('prathna_token') || '');
@@ -118,13 +156,14 @@ export default function App() {
   const [passwordChangeError, setPasswordChangeError] = useState('');
 
   // Navigation tabs: 'dashboard' | 'invoice' | 'purchase' | 'product' | 'customer' | 'supplier' | 'reports' | 'settings'
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [activeTab, setActiveTab] = useState(() => getInitialNavigation().tab);
 
   // Core collections
   const [products, setProducts] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
   const [purchases, setPurchases] = useState([]);
+  const [invoices, setInvoices] = useState([]);
   const [dashboardSummary, setDashboardSummary] = useState(null);
   const [companySettings, setCompanySettings] = useState({
     name: '',
@@ -132,9 +171,12 @@ export default function App() {
     phone: '',
     gstin: '',
     pan: '',
+    logoUrl: '',
     terms: '',
     termsGujarati: '',
   });
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+  const logoInputRef = useRef(null);
 
   const [loadingInitial, setLoadingInitial] = useState(false);
   const [toast, setToast] = useState(null);
@@ -198,10 +240,12 @@ export default function App() {
   // Settings state
   const [savingSettings, setSavingSettings] = useState(false);
 
-  // Invoice ID lookup tester
-  const [lookupInvoiceId, setLookupInvoiceId] = useState('');
-  const [lookupResult, setLookupResult] = useState(null);
-  const [lookingUp, setLookingUp] = useState(false);
+  // Past Invoices & Search state
+  const [invoiceSubTab, setInvoiceSubTab] = useState('create'); // 'create' | 'history'
+  const [invoiceSearchQuery, setInvoiceSearchQuery] = useState('');
+  const [searchedInvoices, setSearchedInvoices] = useState(null);
+  const [searchingInvoices, setSearchingInvoices] = useState(false);
+  const [expandedInvoiceId, setExpandedInvoiceId] = useState(null);
 
   // Sales Return Modal State
   const [returnModalInvoice, setReturnModalInvoice] = useState(null);
@@ -210,7 +254,7 @@ export default function App() {
   const [submittingReturn, setSubmittingReturn] = useState(false);
 
   // Reports state
-  const [reportSubTab, setReportSubTab] = useState('sales'); // 'sales' | 'purchases' | 'stock'
+  const [reportSubTab, setReportSubTab] = useState(() => getInitialNavigation().reportSubTab); // 'sales' | 'purchases' | 'stock'
   const [reportFromDate, setReportFromDate] = useState('');
   const [reportToDate, setReportToDate] = useState('');
   const [salesReportData, setSalesReportData] = useState(null);
@@ -320,6 +364,13 @@ export default function App() {
     setShowPasswordChangeModal(false);
     localStorage.removeItem('prathna_token');
     localStorage.removeItem('prathna_user');
+    localStorage.removeItem('prathna_active_tab');
+    localStorage.removeItem('prathna_report_sub_tab');
+    if (window.location.hash) {
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
+    setActiveTab('dashboard');
+    setReportSubTab('sales');
     if (msg && typeof msg === 'string') {
       showToast(msg, 'error');
     } else {
@@ -386,7 +437,7 @@ export default function App() {
     setLoadingInitial(true);
     setDataLoadError('');
     try {
-      const [pRes, cRes, sRes, puRes, setRes, dashRes, recRes] = await Promise.all([
+      const [pRes, cRes, sRes, puRes, setRes, dashRes, recRes, invRes] = await Promise.all([
         authFetch('/products'),
         authFetch('/customers'),
         authFetch('/suppliers'),
@@ -394,9 +445,10 @@ export default function App() {
         authFetch('/settings'),
         authFetch('/dashboard/summary'),
         authFetch('/customers/recent').catch(() => null),
+        authFetch('/invoices').catch(() => null),
       ]);
 
-      const [pData, cData, sData, puData, setData, dashData, recData] = await Promise.all([
+      const [pData, cData, sData, puData, setData, dashData, recData, invData] = await Promise.all([
         pRes.json(),
         cRes.json(),
         sRes.json(),
@@ -404,6 +456,7 @@ export default function App() {
         setRes.json(),
         dashRes.json(),
         recRes ? recRes.json().catch(() => []) : [],
+        invRes ? invRes.json().catch(() => []) : [],
       ]);
 
       setProducts(Array.isArray(pData) ? pData : []);
@@ -411,6 +464,7 @@ export default function App() {
       setRecentCustomers(Array.isArray(recData) ? recData : []);
       setSuppliers(Array.isArray(sData) ? sData : []);
       setPurchases(Array.isArray(puData) ? puData : []);
+      setInvoices(Array.isArray(invData) ? invData : []);
       if (setData && !setData.error) setCompanySettings(setData);
       if (dashData && !dashData.error) {
         setDashboardSummary(dashData);
@@ -435,6 +489,27 @@ export default function App() {
       setLoadingInitial(false);
     }
   };
+
+  // Fetch initial public system and branding status (runs on mount even before login)
+  useEffect(() => {
+    fetch('/auth/status')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.hasUsers === false) {
+          setIsRegisterMode(true);
+        }
+        if (data.company) {
+          setCompanySettings((prev) => ({
+            ...prev,
+            name: data.company.name || prev.name,
+            logoUrl: data.company.logoUrl !== undefined ? data.company.logoUrl : prev.logoUrl,
+          }));
+        }
+      })
+      .catch((err) => {
+        console.warn('Failed to fetch public auth/branding status:', err);
+      });
+  }, []);
 
   useEffect(() => {
     if (token) {
@@ -503,6 +578,33 @@ export default function App() {
       loadReport();
     }
   }, [token, activeTab, reportSubTab]);
+
+  // Synchronize activeTab and reportSubTab with URL hash and localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('prathna_active_tab', activeTab);
+      localStorage.setItem('prathna_report_sub_tab', reportSubTab);
+      const targetHash = activeTab === 'reports' ? `#reports/${reportSubTab}` : `#${activeTab}`;
+      if (window.location.hash !== targetHash) {
+        window.history.replaceState(null, '', targetHash);
+      }
+    } catch (e) {
+      console.error('Failed to sync navigation state:', e);
+    }
+  }, [activeTab, reportSubTab]);
+
+  // Support browser Back and Forward navigation buttons
+  useEffect(() => {
+    const handleHashChange = () => {
+      const nav = getInitialNavigation();
+      setActiveTab(nav.tab);
+      if (nav.tab === 'reports' && nav.reportSubTab) {
+        setReportSubTab(nav.reportSubTab);
+      }
+    };
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
 
   const [pdfCopyType, setPdfCopyType] = useState('Original');
 
@@ -735,6 +837,87 @@ export default function App() {
     }
   };
 
+  const handleLogoFileChange = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate type (PNG / JPEG)
+    if (!['image/png', 'image/jpeg', 'image/jpg'].includes(file.type)) {
+      showToast('Please select a PNG or JPG image file', 'error');
+      e.target.value = '';
+      return;
+    }
+
+    // Validate size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      showToast('Logo file size must be under 5MB', 'error');
+      e.target.value = '';
+      return;
+    }
+
+    setUploadingLogo(true);
+    try {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        try {
+          const base64Image = reader.result;
+          const res = await authFetch('/settings/logo', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ image: base64Image }),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || 'Failed to upload logo');
+
+          setCompanySettings((prev) => ({
+            ...prev,
+            logoUrl: data.logoUrl,
+          }));
+          showToast('Company logo updated successfully!', 'success');
+        } catch (uploadErr) {
+          showToast(uploadErr.message, 'error');
+        } finally {
+          setUploadingLogo(false);
+          if (logoInputRef.current) logoInputRef.current.value = '';
+        }
+      };
+      reader.onerror = () => {
+        showToast('Failed to read image file', 'error');
+        setUploadingLogo(false);
+        if (logoInputRef.current) logoInputRef.current.value = '';
+      };
+      reader.readAsDataURL(file);
+    } catch (err) {
+      showToast(err.message, 'error');
+      setUploadingLogo(false);
+      if (logoInputRef.current) logoInputRef.current.value = '';
+    }
+  };
+
+  const handleRemoveLogo = async () => {
+    if (!confirm('Are you sure you want to remove the company logo and revert to text branding?')) {
+      return;
+    }
+    setUploadingLogo(true);
+    try {
+      const res = await authFetch('/settings/logo', {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to remove logo');
+
+      setCompanySettings((prev) => ({
+        ...prev,
+        logoUrl: null,
+      }));
+      showToast('Company logo removed. Reverted to text branding.', 'success');
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setUploadingLogo(false);
+    }
+  };
+
   // --- Handlers: Invoice ---
   const handleAddItemToInvoice = () => {
     if (!selectedProductId) {
@@ -878,7 +1061,7 @@ export default function App() {
 
       showToast(`Invoice ${data.invoiceNumber} saved successfully!`, 'success');
       setSavedInvoiceJSON(data);
-      setLookupInvoiceId(data.id);
+      setInvoices((prev) => [data, ...prev]);
       setInvoiceItems([]);
       await loadData();
     } catch (err) {
@@ -947,22 +1130,33 @@ export default function App() {
     }
   };
 
-  const handleLookupInvoice = async (e) => {
-    e.preventDefault();
-    if (!lookupInvoiceId.trim()) return;
+  const handleSearchInvoices = async (e) => {
+    if (e) e.preventDefault();
+    const q = invoiceSearchQuery.trim();
+    if (!q) {
+      setSearchedInvoices(null);
+      return;
+    }
 
-    setLookingUp(true);
-    setLookupResult(null);
+    setSearchingInvoices(true);
     try {
-      const res = await authFetch(`/invoices/${lookupInvoiceId.trim()}`);
+      const res = await authFetch(`/invoices?search=${encodeURIComponent(q)}`);
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Invoice not found');
-      setLookupResult(data);
+      if (!res.ok) throw new Error(data.error || 'Failed to search invoices');
+      setSearchedInvoices(Array.isArray(data) ? data : []);
+      if (Array.isArray(data) && data.length === 0) {
+        showToast(`No invoices found matching "${q}"`, 'error');
+      }
     } catch (err) {
       showToast(err.message, 'error');
     } finally {
-      setLookingUp(false);
+      setSearchingInvoices(false);
     }
+  };
+
+  const handleClearInvoiceSearch = () => {
+    setInvoiceSearchQuery('');
+    setSearchedInvoices(null);
   };
 
   // =========================================================================
@@ -981,8 +1175,16 @@ export default function App() {
         )}
 
         <div className="login-card">
-          <div className="login-header">
-            <h1 className="login-title">{companySettings.name || 'Store Billing Counter'}</h1>
+          <div className={`login-header ${companySettings.logoUrl ? 'login-header-centered' : ''}`}>
+            {companySettings.logoUrl ? (
+              <img
+                src={companySettings.logoUrl}
+                alt={companySettings.name || 'Company Logo'}
+                className="login-logo"
+              />
+            ) : (
+              <h1 className="login-title">{companySettings.name || 'Store Billing Counter'}</h1>
+            )}
             <p className="login-subtitle">
               {isRegisterMode ? 'Create initial shop owner login' : 'Log in to open the billing counter'}
             </p>
@@ -1113,7 +1315,15 @@ export default function App() {
       {/* LEFT SIDEBAR NAVIGATION */}
       <aside className="sidebar">
         <div className="sidebar-header">
-          <div className="sidebar-title">{companySettings.name || 'Your Company Name'}</div>
+          {companySettings.logoUrl ? (
+            <img
+              src={companySettings.logoUrl}
+              alt={companySettings.name || 'Company Logo'}
+              className="sidebar-logo"
+            />
+          ) : (
+            <div className="sidebar-title">{companySettings.name || 'Your Company Name'}</div>
+          )}
           <div className="sidebar-subtitle">Billing & Inventory</div>
         </div>
 
@@ -1369,14 +1579,62 @@ export default function App() {
         )}
 
         {/* ========================================================================= */}
-        {/* TAB 2: INVOICES (CREATE + LOOKUP + RETURNS) */}
+        {/* TAB 2: INVOICES (CREATE + SEARCH & PAST INVOICES + RETURNS) */}
         {/* ========================================================================= */}
-        {activeTab === 'invoice' && (
+        {activeTab === 'invoice' && (() => {
+          const displayedInvoices = searchedInvoices !== null
+            ? searchedInvoices
+            : (invoiceSearchQuery.trim()
+              ? invoices.filter((inv) => {
+                  const q = invoiceSearchQuery.toLowerCase().trim();
+                  const cleanNum = q.replace(/^inv-?/i, '');
+                  const invNum = (inv.invoiceNumber || '').toLowerCase();
+                  const custName = (inv.customer?.name || '').toLowerCase();
+                  const custMobile = (inv.customer?.mobile || '');
+                  const custGstin = (inv.customer?.gstin || '').toLowerCase();
+                  return (
+                    invNum.includes(q) ||
+                    (cleanNum && invNum.includes(cleanNum)) ||
+                    custName.includes(q) ||
+                    custMobile.includes(q) ||
+                    custGstin.includes(q)
+                  );
+                })
+              : invoices);
+
+          return (
           <div>
-            <div className="page-header">
-              <h1 className="page-title">Create Sales Invoice</h1>
-              <p className="page-subtitle">Select customer, add products, and generate GST tax invoice</p>
+            {/* Header with Sub-tab Switcher */}
+            <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '14px' }}>
+              <div>
+                <h1 className="page-title">{invoiceSubTab === 'create' ? 'Create Sales Invoice' : 'Past Invoices Directory'}</h1>
+                <p className="page-subtitle">
+                  {invoiceSubTab === 'create'
+                    ? 'Select customer, add products, and generate GST tax invoice'
+                    : 'Search, view details, download PDFs, or process returns for past sales'}
+                </p>
+              </div>
+              <div className="tab-pills" style={{ margin: 0 }}>
+                <button
+                  type="button"
+                  className={`tab-pill ${invoiceSubTab === 'create' ? 'active' : ''}`}
+                  onClick={() => setInvoiceSubTab('create')}
+                >
+                  <Plus size={15} /> Create Invoice
+                </button>
+                <button
+                  type="button"
+                  className={`tab-pill ${invoiceSubTab === 'history' ? 'active' : ''}`}
+                  onClick={() => setInvoiceSubTab('history')}
+                >
+                  <Receipt size={15} /> Past Invoices ({invoices.length})
+                </button>
+              </div>
             </div>
+
+            {/* Sub-tab 1: Create Invoice */}
+            {invoiceSubTab === 'create' && (
+              <div>
 
             {/* Saved Invoice Banner */}
             {savedInvoiceJSON && (
@@ -1576,210 +1834,511 @@ export default function App() {
                   <div>
                     <label className="form-label" style={{ fontSize: '0.8125rem' }}>Quantity</label>
                     <input
-                      type="number"
-                      min="1"
-                      className="form-input"
-                      value={itemQty}
-                      onChange={(e) => setItemQty(e.target.value)}
-                      placeholder="1"
-                    />
-                  </div>
-                  <div>
-                    <label className="form-label" style={{ fontSize: '0.8125rem' }}>Unit Rate (₹)</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      className="form-input"
-                      value={itemRate}
-                      onChange={(e) => setItemRate(e.target.value)}
-                      placeholder="e.g. 200"
-                      title="Selling price can be freely negotiated and edited per line"
-                    />
-                  </div>
-                  <button type="button" className="btn btn-secondary" onClick={handleAddItemToInvoice}>
-                    <Plus size={16} /> Add Item
-                  </button>
-                </div>
-              </div>
-
-              {/* Step 3: Items Table */}
-              <div style={{ marginBottom: '20px' }}>
-                <div style={{ fontWeight: 600, marginBottom: '8px' }}>Items on Invoice</div>
-                {invoiceItems.length > 0 ? (
-                  <div className="table-container">
-                    <table className="data-table">
-                      <thead>
-                        <tr>
-                          <th>Item Description</th>
-                          <th>HSN/SAC Code</th>
-                          <th style={{ textAlign: 'right' }}>Qty</th>
-                          <th style={{ textAlign: 'right' }}>Unit Rate</th>
-                          <th style={{ textAlign: 'right' }}>GST Rate</th>
-                          <th style={{ textAlign: 'right' }}>Total</th>
-                          <th style={{ textAlign: 'center' }}>Remove</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {invoiceItems.map((item, idx) => {
-                          const lineAmt = (item.qty * Number(item.sellingPrice) * (1 + Number(item.gstRate) / 100)).toFixed(2);
-                          return (
-                            <tr key={idx}>
-                              <td style={{ fontWeight: 600 }}>{item.name}</td>
-                              <td>{item.hsnCode}</td>
-                              <td style={{ textAlign: 'right' }}>{item.qty} {item.unit}</td>
-                              <td style={{ textAlign: 'right' }}>₹{Number(item.sellingPrice).toFixed(2)}</td>
-                              <td style={{ textAlign: 'right' }}>{item.gstRate}%</td>
-                              <td style={{ textAlign: 'right', fontWeight: 600 }}>₹{lineAmt}</td>
-                              <td style={{ textAlign: 'center' }}>
-                                <button
-                                  className="btn btn-danger btn-sm"
-                                  onClick={() => handleRemoveInvoiceItem(idx)}
-                                  title="Remove item"
-                                >
-                                  <Trash2 size={14} />
-                                </button>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : (
-                  <div className="empty-state" style={{ padding: '32px' }}>
-                    <div className="empty-state-title">No items added yet</div>
-                    <div className="empty-state-text">Select a product from the list above and click "Add Item".</div>
-                  </div>
-                )}
-              </div>
-
-              {/* Step 4: Bill Summary Box */}
-              {invoiceItems.length > 0 && (
-                <div style={{ background: 'var(--bg-canvas)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '20px', marginBottom: '24px' }}>
-                  <div style={{ maxWidth: '340px', marginLeft: 'auto' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '0.9375rem' }}>
-                      <span style={{ color: 'var(--text-secondary)' }}>Price before tax:</span>
-                      <span style={{ fontWeight: 600 }}>₹{liveTotals.taxableTotal}</span>
+                          type="number"
+                          min="1"
+                          className="form-input"
+                          value={itemQty}
+                          onChange={(e) => setItemQty(e.target.value)}
+                          placeholder="1"
+                        />
+                      </div>
+                      <div>
+                        <label className="form-label" style={{ fontSize: '0.8125rem' }}>Unit Rate (₹)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          className="form-input"
+                          value={itemRate}
+                          onChange={(e) => setItemRate(e.target.value)}
+                          placeholder="e.g. 200"
+                          title="Selling price can be freely negotiated and edited per line"
+                        />
+                      </div>
+                      <button type="button" className="btn btn-secondary" onClick={handleAddItemToInvoice}>
+                        <Plus size={16} /> Add Item
+                      </button>
                     </div>
-                    {invoiceTaxType === 'INTERSTATE' ? (
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '0.9375rem' }}>
-                        <span style={{ color: 'var(--text-secondary)' }}>Integrated GST (IGST 18%):</span>
-                        <span style={{ fontWeight: 600, color: '#6B21A8' }}>₹{liveTotals.igstTotal}</span>
+                  </div>
+
+                  {/* Step 3: Items Table */}
+                  <div style={{ marginBottom: '20px' }}>
+                    <div style={{ fontWeight: 600, marginBottom: '8px' }}>Items on Invoice</div>
+                    {invoiceItems.length > 0 ? (
+                      <div className="table-container">
+                        <table className="data-table">
+                          <thead>
+                            <tr>
+                              <th>Item Description</th>
+                              <th>HSN/SAC Code</th>
+                              <th style={{ textAlign: 'right' }}>Qty</th>
+                              <th style={{ textAlign: 'right' }}>Unit Rate</th>
+                              <th style={{ textAlign: 'right' }}>GST Rate</th>
+                              <th style={{ textAlign: 'right' }}>Total</th>
+                              <th style={{ textAlign: 'center' }}>Remove</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {invoiceItems.map((item, idx) => {
+                              const lineAmt = (item.qty * Number(item.sellingPrice) * (1 + Number(item.gstRate) / 100)).toFixed(2);
+                              return (
+                                <tr key={idx}>
+                                  <td style={{ fontWeight: 600 }}>{item.name}</td>
+                                  <td>{item.hsnCode}</td>
+                                  <td style={{ textAlign: 'right' }}>{item.qty} {item.unit}</td>
+                                  <td style={{ textAlign: 'right' }}>₹{Number(item.sellingPrice).toFixed(2)}</td>
+                                  <td style={{ textAlign: 'right' }}>{item.gstRate}%</td>
+                                  <td style={{ textAlign: 'right', fontWeight: 600 }}>₹{lineAmt}</td>
+                                  <td style={{ textAlign: 'center' }}>
+                                    <button
+                                      className="btn btn-danger btn-sm"
+                                      onClick={() => handleRemoveInvoiceItem(idx)}
+                                      title="Remove item"
+                                    >
+                                      <Trash2 size={14} />
+                                    </button>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
                       </div>
                     ) : (
-                      <>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '0.9375rem' }}>
-                          <span style={{ color: 'var(--text-secondary)' }}>Central GST (CGST 9%):</span>
-                          <span>₹{liveTotals.cgstTotal}</span>
-                        </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '0.9375rem' }}>
-                          <span style={{ color: 'var(--text-secondary)' }}>State GST (SGST 9%):</span>
-                          <span>₹{liveTotals.sgstTotal}</span>
-                        </div>
-                      </>
-                    )}
-                    {Number(liveTotals.roundOff) !== 0 && (
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
-                        <span>Round-off:</span>
-                        <span>₹{liveTotals.roundOff}</span>
+                      <div className="empty-state" style={{ padding: '32px' }}>
+                        <div className="empty-state-title">No items added yet</div>
+                        <div className="empty-state-text">Select a product from the list above and click "Add Item".</div>
                       </div>
                     )}
-                    <div style={{ borderTop: '2px solid var(--border)', paddingTop: '10px', marginTop: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontSize: '1.125rem', fontWeight: 700 }}>Total Bill Amount:</span>
-                      <span style={{ fontSize: '1.375rem', fontWeight: 700, color: 'var(--primary)' }}>₹{liveTotals.billAmount}</span>
-                    </div>
                   </div>
+
+                  {/* Step 4: Bill Summary Box */}
+                  {invoiceItems.length > 0 && (
+                    <div style={{ background: 'var(--bg-canvas)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '20px', marginBottom: '24px' }}>
+                      <div style={{ maxWidth: '340px', marginLeft: 'auto' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '0.9375rem' }}>
+                          <span style={{ color: 'var(--text-secondary)' }}>Price before tax:</span>
+                          <span style={{ fontWeight: 600 }}>₹{liveTotals.taxableTotal}</span>
+                        </div>
+                        {invoiceTaxType === 'INTERSTATE' ? (
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '0.9375rem' }}>
+                            <span style={{ color: 'var(--text-secondary)' }}>Integrated GST (IGST 18%):</span>
+                            <span style={{ fontWeight: 600, color: '#6B21A8' }}>₹{liveTotals.igstTotal}</span>
+                          </div>
+                        ) : (
+                          <>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '0.9375rem' }}>
+                              <span style={{ color: 'var(--text-secondary)' }}>Central GST (CGST 9%):</span>
+                              <span>₹{liveTotals.cgstTotal}</span>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '0.9375rem' }}>
+                              <span style={{ color: 'var(--text-secondary)' }}>State GST (SGST 9%):</span>
+                              <span>₹{liveTotals.sgstTotal}</span>
+                            </div>
+                          </>
+                        )}
+                        {Number(liveTotals.roundOff) !== 0 && (
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                            <span>Round-off:</span>
+                            <span>₹{liveTotals.roundOff}</span>
+                          </div>
+                        )}
+                        <div style={{ borderTop: '2px solid var(--border)', paddingTop: '10px', marginTop: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontSize: '1.125rem', fontWeight: 700 }}>Total Bill Amount:</span>
+                          <span style={{ fontSize: '1.375rem', fontWeight: 700, color: 'var(--primary)' }}>₹{liveTotals.billAmount}</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Primary Action */}
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    style={{ width: '100%', fontSize: '1.0625rem', padding: '14px' }}
+                    onClick={handleSaveInvoice}
+                    disabled={creatingInvoice || invoiceItems.length === 0}
+                  >
+                    {creatingInvoice ? 'Saving Invoice...' : 'Save & Print Invoice'}
+                  </button>
                 </div>
-              )}
 
-              {/* Primary Action */}
-              <button
-                type="button"
-                className="btn btn-primary"
-                style={{ width: '100%', fontSize: '1.0625rem', padding: '14px' }}
-                onClick={handleSaveInvoice}
-                disabled={creatingInvoice || invoiceItems.length === 0}
-              >
-                {creatingInvoice ? 'Saving Invoice...' : 'Save & Print Invoice'}
-              </button>
-            </div>
-
-            {/* Quick Invoice Lookup Tool */}
-            <div className="card" style={{ marginTop: '24px' }}>
-              <h2 style={{ fontSize: '1.125rem', fontWeight: 600, marginBottom: '12px' }}>Lookup Past Invoice</h2>
-              <form onSubmit={handleLookupInvoice} style={{ display: 'flex', gap: '10px', marginBottom: '16px' }}>
-                <input
-                  type="text"
-                  className="form-input"
-                  placeholder="Enter Invoice UUID or ID..."
-                  value={lookupInvoiceId}
-                  onChange={(e) => setLookupInvoiceId(e.target.value)}
-                />
-                <button type="submit" className="btn btn-secondary" disabled={lookingUp}>
-                  <Search size={16} /> {lookingUp ? 'Searching...' : 'Find Invoice'}
-                </button>
-              </form>
-
-              {lookupResult && (
-                <div style={{ background: 'var(--bg-canvas)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '16px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                {/* Quick Search Past Invoices Section at bottom */}
+                <div className="card" style={{ marginTop: '24px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
                     <div>
-                      <span style={{ fontWeight: 700, fontSize: '1.125rem' }}>{lookupResult.invoiceNumber}</span>
-                      <span style={{ marginLeft: '10px', color: 'var(--text-secondary)' }}>
-                        {new Date(lookupResult.invoiceDate || lookupResult.createdAt).toLocaleDateString('en-IN')}
-                      </span>
+                      <h2 style={{ fontSize: '1.125rem', fontWeight: 600 }}>Quick Search Past Invoices</h2>
+                      <p style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', margin: 0 }}>
+                        Search any past invoice by invoice number, customer name, or phone
+                      </p>
                     </div>
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      <button
-                        className="btn btn-primary btn-sm"
-                        onClick={() => handleDownloadPdf(lookupResult.id, lookupResult.invoiceNumber)}
-                      >
-                        <Download size={14} /> Download PDF
-                      </button>
-                      <button
-                        className="btn btn-secondary btn-sm"
-                        onClick={() => openReturnModal(lookupResult)}
-                      >
-                        <RotateCcw size={14} /> Return Items
-                      </button>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => setInvoiceSubTab('history')}
+                    >
+                      View All Past Invoices ({invoices.length}) &rarr;
+                    </button>
+                  </div>
+
+                  <form onSubmit={handleSearchInvoices} style={{ display: 'flex', gap: '10px', marginBottom: '16px' }}>
+                    <div style={{ position: 'relative', flex: 1 }}>
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="Search invoice number (e.g. 1001 or INV-1001), customer, or phone..."
+                        value={invoiceSearchQuery}
+                        onChange={(e) => {
+                          setInvoiceSearchQuery(e.target.value);
+                          if (!e.target.value.trim()) setSearchedInvoices(null);
+                        }}
+                      />
+                      {invoiceSearchQuery && (
+                        <button
+                          type="button"
+                          onClick={handleClearInvoiceSearch}
+                          style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)' }}
+                          title="Clear search"
+                        >
+                          <X size={16} />
+                        </button>
+                      )}
                     </div>
-                  </div>
-                  <div style={{ fontSize: '0.9375rem', marginBottom: '6px' }}>
-                    <strong>Customer:</strong> {lookupResult.customer?.name} ({lookupResult.customer?.mobile || 'No mobile'})
-                  </div>
-                  <div style={{ fontSize: '0.9375rem', marginBottom: '12px' }}>
-                    <strong>Grand Total:</strong> ₹{lookupResult.billAmount} | <strong>Status:</strong> {lookupResult.paymentStatus}
-                  </div>
-                  <div className="table-container">
-                    <table className="data-table">
-                      <thead>
-                        <tr>
-                          <th>Item</th>
-                          <th>HSN/SAC Code</th>
-                          <th style={{ textAlign: 'right' }}>Qty</th>
-                          <th style={{ textAlign: 'right' }}>Rate</th>
-                          <th style={{ textAlign: 'right' }}>Total</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {lookupResult.items?.map((it) => (
-                          <tr key={it.id}>
-                            <td>{it.descriptionSnapshot}</td>
-                            <td>{it.hsnSnapshot}</td>
-                            <td style={{ textAlign: 'right' }}>{Number(it.qty)}</td>
-                            <td style={{ textAlign: 'right' }}>₹{Number(it.rate).toFixed(2)}</td>
-                            <td style={{ textAlign: 'right', fontWeight: 600 }}>₹{Number(it.amount).toFixed(2)}</td>
+                    <button type="submit" className="btn btn-secondary" disabled={searchingInvoices}>
+                      <Search size={16} /> {searchingInvoices ? 'Searching...' : 'Search'}
+                    </button>
+                  </form>
+
+                  {displayedInvoices.length > 0 ? (
+                    <div className="table-container">
+                      <table className="data-table">
+                        <thead>
+                          <tr>
+                            <th>Invoice No</th>
+                            <th>Date</th>
+                            <th>Customer</th>
+                            <th style={{ textAlign: 'right' }}>Amount</th>
+                            <th style={{ textAlign: 'center' }}>Details</th>
+                            <th style={{ textAlign: 'right' }}>Actions</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                        </thead>
+                        <tbody>
+                          {displayedInvoices.slice(0, 5).map((inv) => (
+                            <React.Fragment key={inv.id}>
+                              <tr>
+                                <td style={{ fontWeight: 600 }}>{inv.invoiceNumber}</td>
+                                <td>{new Date(inv.invoiceDate || inv.createdAt).toLocaleDateString('en-IN')}</td>
+                                <td>
+                                  <div style={{ fontWeight: 600 }}>{inv.customer?.name || 'Walk-in Customer'}</div>
+                                  {inv.customer?.mobile && <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{inv.customer.mobile}</div>}
+                                </td>
+                                <td style={{ textAlign: 'right', fontWeight: 600 }}>₹{Number(inv.billAmount).toFixed(2)}</td>
+                                <td style={{ textAlign: 'center' }}>
+                                  <button
+                                    type="button"
+                                    className="btn btn-secondary btn-sm"
+                                    onClick={() => setExpandedInvoiceId(expandedInvoiceId === inv.id ? null : inv.id)}
+                                    style={{ fontSize: '0.75rem', padding: '3px 8px' }}
+                                  >
+                                    <Eye size={13} /> {expandedInvoiceId === inv.id ? 'Hide' : `${inv.items?.length || 0} items`}
+                                  </button>
+                                </td>
+                                <td style={{ textAlign: 'right' }}>
+                                  <div style={{ display: 'inline-flex', gap: '6px' }}>
+                                    <button
+                                      className="btn btn-primary btn-sm"
+                                      onClick={() => handleDownloadPdf(inv.id, inv.invoiceNumber)}
+                                      title="Download PDF"
+                                    >
+                                      <Download size={13} /> PDF
+                                    </button>
+                                    <button
+                                      className="btn btn-secondary btn-sm"
+                                      onClick={() => openReturnModal(inv)}
+                                      title="Return items"
+                                    >
+                                      <RotateCcw size={13} /> Return
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                              {expandedInvoiceId === inv.id && (
+                                <tr>
+                                  <td colSpan={6} style={{ background: 'var(--bg-canvas)', padding: '12px 16px' }}>
+                                    <div style={{ fontWeight: 600, fontSize: '0.8125rem', marginBottom: '8px' }}>Line Items on {inv.invoiceNumber}:</div>
+                                    <table className="data-table" style={{ fontSize: '0.8125rem' }}>
+                                      <thead>
+                                        <tr>
+                                          <th>Item Description</th>
+                                          <th>HSN/SAC</th>
+                                          <th style={{ textAlign: 'right' }}>Qty</th>
+                                          <th style={{ textAlign: 'right' }}>Rate</th>
+                                          <th style={{ textAlign: 'right' }}>Total</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {inv.items?.map((it) => (
+                                          <tr key={it.id}>
+                                            <td style={{ fontWeight: 600 }}>{it.descriptionSnapshot || it.product?.name}</td>
+                                            <td>{it.hsnSnapshot || it.product?.hsnCode || '-'}</td>
+                                            <td style={{ textAlign: 'right' }}>{Number(it.qty)}</td>
+                                            <td style={{ textAlign: 'right' }}>₹{Number(it.rate).toFixed(2)}</td>
+                                            <td style={{ textAlign: 'right', fontWeight: 600 }}>₹{Number(it.amount).toFixed(2)}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </td>
+                                </tr>
+                              )}
+                            </React.Fragment>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="empty-state" style={{ padding: '24px' }}>
+                      <div className="empty-state-title">
+                        {invoiceSearchQuery ? `No invoices found matching "${invoiceSearchQuery}"` : 'No past invoices found'}
+                      </div>
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
+              </div>
+            )}
+
+            {/* Sub-tab 2: Past Invoices Directory & Full Search */}
+            {invoiceSubTab === 'history' && (
+              <div>
+                <div className="card" style={{ marginBottom: '20px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
+                    <h2 style={{ fontSize: '1.125rem', fontWeight: 600, margin: 0 }}>
+                      Search All Past Invoices
+                    </h2>
+                    <span className="badge badge-neutral" style={{ fontSize: '0.8125rem' }}>
+                      {displayedInvoices.length} {displayedInvoices.length === 1 ? 'Invoice' : 'Invoices'} Available
+                    </span>
+                  </div>
+
+                  <form onSubmit={handleSearchInvoices} style={{ display: 'flex', gap: '10px' }}>
+                    <div style={{ position: 'relative', flex: 1 }}>
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="Type invoice number (e.g. 1001, INV-1001), customer name, or phone..."
+                        value={invoiceSearchQuery}
+                        onChange={(e) => {
+                          setInvoiceSearchQuery(e.target.value);
+                          if (!e.target.value.trim()) setSearchedInvoices(null);
+                        }}
+                      />
+                      {invoiceSearchQuery && (
+                        <button
+                          type="button"
+                          onClick={handleClearInvoiceSearch}
+                          style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)' }}
+                          title="Clear search"
+                        >
+                          <X size={16} />
+                        </button>
+                      )}
+                    </div>
+                    <button type="submit" className="btn btn-secondary" disabled={searchingInvoices}>
+                      <Search size={16} /> {searchingInvoices ? 'Searching...' : 'Search'}
+                    </button>
+                    {invoiceSearchQuery && (
+                      <button type="button" className="btn btn-secondary" onClick={handleClearInvoiceSearch}>
+                        Reset
+                      </button>
+                    )}
+                  </form>
+                </div>
+
+                <div className="card">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                    <h2 style={{ fontSize: '1.125rem', fontWeight: 600 }}>Past Invoices List</h2>
+                    <button className="btn btn-primary btn-sm" onClick={() => setInvoiceSubTab('create')}>
+                      <Plus size={14} /> Create New Invoice
+                    </button>
+                  </div>
+
+                  {displayedInvoices.length > 0 ? (
+                    <div className="table-container">
+                      <table className="data-table">
+                        <thead>
+                          <tr>
+                            <th>Invoice No</th>
+                            <th>Date</th>
+                            <th>Customer Details</th>
+                            <th>Tax Treatment</th>
+                            <th style={{ textAlign: 'right' }}>Total Amount</th>
+                            <th>Status</th>
+                            <th style={{ textAlign: 'center' }}>Details</th>
+                            <th style={{ textAlign: 'right' }}>Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {displayedInvoices.map((inv) => {
+                            const isExpanded = expandedInvoiceId === inv.id;
+                            const isInterstate = inv.taxType === 'INTERSTATE';
+                            return (
+                              <React.Fragment key={inv.id}>
+                                <tr>
+                                  <td style={{ fontWeight: 700, color: 'var(--primary)' }}>{inv.invoiceNumber}</td>
+                                  <td>{new Date(inv.invoiceDate || inv.createdAt).toLocaleDateString('en-IN')}</td>
+                                  <td>
+                                    <div style={{ fontWeight: 600 }}>{inv.customer?.name || 'Walk-in Customer'}</div>
+                                    {inv.customer?.mobile && (
+                                      <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                                        📞 {inv.customer.mobile}
+                                      </div>
+                                    )}
+                                    {inv.customer?.gstin && (
+                                      <div style={{ fontSize: '0.6875rem', color: 'var(--text-secondary)', fontFamily: 'monospace' }}>
+                                        GSTIN: {inv.customer.gstin}
+                                      </div>
+                                    )}
+                                  </td>
+                                  <td>
+                                    <span className={`badge ${isInterstate ? 'badge-warning' : 'badge-neutral'}`}>
+                                      {isInterstate ? 'IGST 18%' : 'CGST+SGST 18%'}
+                                    </span>
+                                  </td>
+                                  <td style={{ textAlign: 'right', fontWeight: 700, fontSize: '0.9375rem' }}>
+                                    ₹{Number(inv.billAmount).toFixed(2)}
+                                  </td>
+                                  <td>
+                                    <span className="badge badge-success">{inv.paymentStatus || 'PAID'}</span>
+                                    {inv.returns && inv.returns.length > 0 && (
+                                      <span className="badge badge-warning" style={{ marginLeft: '4px' }}>
+                                        {inv.returns.length} Return{inv.returns.length > 1 ? 's' : ''}
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td style={{ textAlign: 'center' }}>
+                                    <button
+                                      type="button"
+                                      className="btn btn-secondary btn-sm"
+                                      onClick={() => setExpandedInvoiceId(isExpanded ? null : inv.id)}
+                                      style={{ fontSize: '0.75rem', padding: '4px 10px' }}
+                                    >
+                                      <Eye size={13} /> {isExpanded ? 'Hide' : `${inv.items?.length || 0} items`}
+                                    </button>
+                                  </td>
+                                  <td style={{ textAlign: 'right' }}>
+                                    <div style={{ display: 'inline-flex', gap: '6px', alignItems: 'center' }}>
+                                      <select
+                                        className="form-select"
+                                        style={{ width: 'auto', padding: '2px 6px', fontSize: '0.75rem', minHeight: '30px' }}
+                                        value={pdfCopyType}
+                                        onChange={(e) => setPdfCopyType(e.target.value)}
+                                        title="Invoice copy"
+                                      >
+                                        <option value="Original">Original</option>
+                                        <option value="Duplicate">Duplicate</option>
+                                        <option value="Triplicate">Triplicate</option>
+                                      </select>
+                                      <button
+                                        className="btn btn-primary btn-sm"
+                                        onClick={() => handleDownloadPdf(inv.id, inv.invoiceNumber, pdfCopyType)}
+                                        title="Download PDF Invoice"
+                                      >
+                                        <Download size={13} /> PDF
+                                      </button>
+                                      <button
+                                        className="btn btn-secondary btn-sm"
+                                        onClick={() => openReturnModal(inv)}
+                                        title="Return items from this invoice"
+                                      >
+                                        <RotateCcw size={13} /> Return
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                                {isExpanded && (
+                                  <tr>
+                                    <td colSpan={8} style={{ background: 'var(--bg-canvas)', padding: '16px 20px', borderLeft: '4px solid var(--primary)' }}>
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                                        <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>
+                                          Line Items Breakdown for {inv.invoiceNumber} ({inv.items?.length || 0} items):
+                                        </div>
+                                        <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
+                                          Taxable: ₹{Number(inv.taxableTotal || 0).toFixed(2)} | GST: ₹{(Number(inv.cgstTotal || 0) + Number(inv.sgstTotal || 0) + Number(inv.igstTotal || 0)).toFixed(2)}
+                                        </div>
+                                      </div>
+                                      <table className="data-table" style={{ fontSize: '0.8125rem' }}>
+                                        <thead>
+                                          <tr>
+                                            <th>Item Description</th>
+                                            <th>HSN/SAC Code</th>
+                                            <th style={{ textAlign: 'right' }}>Quantity</th>
+                                            <th style={{ textAlign: 'right' }}>Unit Rate</th>
+                                            <th style={{ textAlign: 'right' }}>GST Rate</th>
+                                            <th style={{ textAlign: 'right' }}>Total Amount</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {inv.items?.map((it) => (
+                                            <tr key={it.id}>
+                                              <td style={{ fontWeight: 600 }}>{it.descriptionSnapshot || it.product?.name}</td>
+                                              <td>{it.hsnSnapshot || it.product?.hsnCode || '-'}</td>
+                                              <td style={{ textAlign: 'right' }}>{Number(it.qty)}</td>
+                                              <td style={{ textAlign: 'right' }}>₹{Number(it.rate).toFixed(2)}</td>
+                                              <td style={{ textAlign: 'right' }}>{it.gstRate}%</td>
+                                              <td style={{ textAlign: 'right', fontWeight: 600 }}>₹{Number(it.amount).toFixed(2)}</td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+
+                                      {inv.returns && inv.returns.length > 0 && (
+                                        <div style={{ marginTop: '14px', paddingTop: '10px', borderTop: '1px dashed var(--border)' }}>
+                                          <div style={{ fontWeight: 600, fontSize: '0.8125rem', color: 'var(--status-warning)', marginBottom: '6px' }}>
+                                            Returns Processed on this Invoice:
+                                          </div>
+                                          {inv.returns.map((ret) => (
+                                            <div key={ret.id} style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
+                                              • {new Date(ret.createdAt).toLocaleDateString('en-IN')}: Refunded ₹{Number(ret.totalAmount).toFixed(2)} {ret.reason ? `(Reason: ${ret.reason})` : ''}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </td>
+                                  </tr>
+                                )}
+                              </React.Fragment>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="empty-state">
+                      <div className="empty-state-title">
+                        {invoiceSearchQuery ? `No invoices match "${invoiceSearchQuery}"` : 'No past invoices recorded yet'}
+                      </div>
+                      <div className="empty-state-text">
+                        {invoiceSearchQuery
+                          ? 'Try searching with a different invoice number, customer name, or phone number.'
+                          : 'Invoices you create will appear here and be searchable at any time.'}
+                      </div>
+                      {invoiceSearchQuery ? (
+                        <button className="btn btn-secondary" onClick={handleClearInvoiceSearch}>
+                          Clear Search
+                        </button>
+                      ) : (
+                        <button className="btn btn-primary" onClick={() => setInvoiceSubTab('create')}>
+                          Create First Invoice
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
-        )}
+          );
+        })()}
 
         {/* ========================================================================= */}
         {/* TAB 3: PURCHASES (INWARD STOCK) */}
@@ -2605,54 +3164,69 @@ export default function App() {
             )}
 
             {/* Sub-tab 3: Stock Valuation Report */}
-            {reportSubTab === 'stock' && stockReportData && (
-              <div>
-                <div className="stats-grid">
-                  <div className="stat-card">
-                    <div className="stat-label">Total Inventory Valuation</div>
-                    <div className="stat-value">₹{Number(stockReportData.totalValuation || 0).toLocaleString('en-IN')}</div>
-                    <div className="stat-hint">Across {stockReportData.products?.length || 0} items</div>
+            {reportSubTab === 'stock' && stockReportData && (() => {
+              const productsList = stockReportData.products || stockReportData.items || [];
+              const totalVal = stockReportData.totalValuation ?? stockReportData.summary?.totalStockValue ?? 0;
+              return (
+                <div>
+                  <div className="stats-grid">
+                    <div className="stat-card">
+                      <div className="stat-label">Total Inventory Valuation</div>
+                      <div className="stat-value">
+                        ₹{Number(totalVal).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </div>
+                      <div className="stat-hint">Across {productsList.length} items</div>
+                    </div>
                   </div>
-                </div>
 
-                <div className="card">
-                  <h2 style={{ fontSize: '1.125rem', fontWeight: 600, marginBottom: '16px' }}>Stock Inventory Details</h2>
-                  <div className="table-container">
-                    <table className="data-table">
-                      <thead>
-                        <tr>
-                          <th>Item</th>
-                          <th>HSN/SAC Code</th>
-                          <th style={{ textAlign: 'right' }}>Cost Price</th>
-                          <th style={{ textAlign: 'right' }}>Selling Price</th>
-                          <th style={{ textAlign: 'right' }}>Current Stock</th>
-                          <th style={{ textAlign: 'right' }}>Stock Valuation</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {stockReportData.products?.map((p) => {
-                          const isLow = Number(p.currentStock) <= Number(p.minStockLevel || 0);
-                          return (
-                            <tr key={p.id}>
-                              <td style={{ fontWeight: 600 }}>{p.name}</td>
-                              <td>{p.hsnCode}</td>
-                              <td style={{ textAlign: 'right' }}>₹{Number(p.purchasePrice).toFixed(2)}</td>
-                              <td style={{ textAlign: 'right' }}>₹{Number(p.sellingPrice).toFixed(2)}</td>
-                              <td style={{ textAlign: 'right' }}>
-                                <span className={`badge ${isLow ? 'badge-warning' : 'badge-neutral'}`}>
-                                  {Number(p.currentStock)} {p.unit}
-                                </span>
+                  <div className="card">
+                    <h2 style={{ fontSize: '1.125rem', fontWeight: 600, marginBottom: '16px' }}>Stock Inventory Details</h2>
+                    <div className="table-container">
+                      <table className="data-table">
+                        <thead>
+                          <tr>
+                            <th>Item</th>
+                            <th>HSN/SAC Code</th>
+                            <th style={{ textAlign: 'right' }}>Cost Price</th>
+                            <th style={{ textAlign: 'right' }}>Selling Price</th>
+                            <th style={{ textAlign: 'right' }}>Current Stock</th>
+                            <th style={{ textAlign: 'right' }}>Stock Valuation</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {productsList.length === 0 ? (
+                            <tr>
+                              <td colSpan={6} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-secondary)' }}>
+                                No products found.
                               </td>
-                              <td style={{ textAlign: 'right', fontWeight: 600 }}>₹{Number(p.lineValuation).toFixed(2)}</td>
                             </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
+                          ) : (
+                            productsList.map((p) => {
+                              const isLow = Number(p.currentStock) <= Number(p.minStockLevel || 0);
+                              const valuation = p.lineValuation ?? p.stockValue ?? (Number(p.currentStock) * Number(p.purchasePrice || 0));
+                              return (
+                                <tr key={p.id}>
+                                  <td style={{ fontWeight: 600 }}>{p.name}</td>
+                                  <td>{p.hsnCode || '-'}</td>
+                                  <td style={{ textAlign: 'right' }}>₹{Number(p.purchasePrice || 0).toFixed(2)}</td>
+                                  <td style={{ textAlign: 'right' }}>₹{Number(p.sellingPrice || 0).toFixed(2)}</td>
+                                  <td style={{ textAlign: 'right' }}>
+                                    <span className={`badge ${isLow ? 'badge-warning' : 'badge-neutral'}`}>
+                                      {Number(p.currentStock)} {p.unit || 'PCS'}
+                                    </span>
+                                  </td>
+                                  <td style={{ textAlign: 'right', fontWeight: 600 }}>₹{Number(valuation).toFixed(2)}</td>
+                                </tr>
+                              );
+                            })
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
           </div>
         )}
 
@@ -2667,6 +3241,57 @@ export default function App() {
             </div>
 
             <div className="card" style={{ maxWidth: '680px' }}>
+              {/* Company Logo Section */}
+              <div className="form-group" style={{ marginBottom: '24px' }}>
+                <label className="form-label" style={{ fontWeight: 600 }}>Company Logo (PDF & UI Branding)</label>
+                <div className="logo-upload-card">
+                  <div className="logo-preview-box">
+                    {companySettings.logoUrl ? (
+                      <img
+                        src={companySettings.logoUrl}
+                        alt="Company Logo"
+                        className="logo-preview-img"
+                      />
+                    ) : (
+                      <div className="logo-empty-text">No logo set (text fallback)</div>
+                    )}
+                  </div>
+                  <div className="logo-actions">
+                    <input
+                      type="file"
+                      ref={logoInputRef}
+                      accept="image/png, image/jpeg, image/jpg"
+                      className="logo-file-input"
+                      onChange={handleLogoFileChange}
+                    />
+                    <div className="logo-actions-row">
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={() => logoInputRef.current?.click()}
+                        disabled={uploadingLogo}
+                      >
+                        <Upload size={15} /> {companySettings.logoUrl ? 'Change Logo' : 'Upload Logo'}
+                      </button>
+                      {companySettings.logoUrl && (
+                        <button
+                          type="button"
+                          className="btn btn-danger"
+                          style={{ padding: '8px 12px' }}
+                          onClick={handleRemoveLogo}
+                          disabled={uploadingLogo}
+                        >
+                          <Trash2 size={15} /> Remove Logo
+                        </button>
+                      )}
+                    </div>
+                    <span className="form-hint" style={{ marginTop: '4px' }}>
+                      Transparent PNG or JPG (max 5MB). Displayed on invoice PDF header, sidebar, and login screen.
+                    </span>
+                  </div>
+                </div>
+              </div>
+
               <form onSubmit={handleSaveSettings}>
                 <div className="form-group">
                   <label className="form-label">Business / Shop Name</label>

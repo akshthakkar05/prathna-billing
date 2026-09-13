@@ -16,6 +16,7 @@ export default defineConfig({
       '/settings': 'http://localhost:5000',
       '/dashboard': 'http://localhost:5000',
       '/reports': 'http://localhost:5000',
+      '/assets': 'http://localhost:5000',
       '/api': {
         target: 'http://localhost:5000',
         changeOrigin: true,

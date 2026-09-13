@@ -6,11 +6,19 @@ import { requireAuth, JWT_SECRET } from '../middleware/auth.js';
 
 const router = Router();
 
-// GET /auth/status - check if initial user exists
+// GET /auth/status - check if initial user exists and return public branding
 router.get('/status', async (req, res) => {
   try {
-    const userCount = await prisma.user.count();
-    res.json({ hasUsers: userCount > 0 });
+    const [userCount, company] = await Promise.all([
+      prisma.user.count(),
+      prisma.companySettings.findFirst({
+        select: { name: true, logoUrl: true },
+      }),
+    ]);
+    res.json({
+      hasUsers: userCount > 0,
+      company: company || { name: 'Prathna Enterprises', logoUrl: null },
+    });
   } catch (error) {
     console.error('Error checking auth status:', error);
     res.status(500).json({ error: 'Failed to check system status' });

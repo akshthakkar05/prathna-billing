@@ -172,16 +172,21 @@ router.get('/stock', async (req, res) => {
         purchasePrice: buyPrice.toString(),
         sellingPrice: sellPrice.toString(),
         stockValue: itemStockValue.toString(),
+        lineValuation: itemStockValue.toString(),
         isLowStock,
       };
     });
+
+    const totalValuation = totalStockValue.toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toString();
 
     res.json({
       summary: {
         totalProducts: products.length,
         lowStockCount,
-        totalStockValue: totalStockValue.toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toString(),
+        totalStockValue: totalValuation,
       },
+      totalValuation,
+      products: stockItems,
       items: stockItems,
     });
   } catch (error) {

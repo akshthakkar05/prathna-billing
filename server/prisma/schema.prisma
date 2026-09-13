@@ -161,6 +161,7 @@ model CompanySettings {
   phone         String?  @default("")
   gstin         String?  @default("")
   pan           String?  @default("")
+  logoUrl       String?
   terms         String?  @default("1. Goods once sold will not be taken back.\n2. Subject to local jurisdiction.")
   termsGujarati String?  @default("શરતો અને નિયમો:\n\n૧. એકવાર વેચેલો માલ પાછો લેવામાં આવશે નહીં.\n૨. વોરંટી કંપનીના નિયમો મુજબ રહેશે.\n૩. ન્યાય ક્ષેત્ર સ્થાનિક રહેશે.")
   updatedAt     DateTime @updatedAt

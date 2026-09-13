@@ -9,14 +9,49 @@ import { resolveCustomerStateCode, determineTaxType } from '../utils/gstStates.j
 const router = Router();
 const Decimal = Prisma.Decimal;
 
-// GET /invoices - list invoices (useful for minimal UI and tests)
+// GET /invoices - list invoices with search & filter support
 router.get('/', async (req, res) => {
   try {
+    const { search, limit } = req.query;
+    const where = {};
+
+    if (search && search.trim()) {
+      const q = search.trim();
+      const numMatch = q.replace(/^inv-?/i, '').trim();
+
+      where.OR = [
+        { invoiceNumber: { contains: q, mode: 'insensitive' } },
+        { customer: { name: { contains: q, mode: 'insensitive' } } },
+        { customer: { mobile: { contains: q } } },
+        { customer: { gstin: { contains: q, mode: 'insensitive' } } },
+      ];
+
+      if (numMatch && numMatch !== q) {
+        where.OR.push({ invoiceNumber: { contains: numMatch, mode: 'insensitive' } });
+      }
+
+      // If valid UUID format, allow direct ID match
+      if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(q)) {
+        where.OR.push({ id: q });
+      }
+    }
+
     const invoices = await prisma.invoice.findMany({
+      where,
       orderBy: { createdAt: 'desc' },
+      take: limit ? parseInt(limit, 10) : 100,
       include: {
         customer: true,
-        items: true,
+        items: {
+          include: {
+            product: true,
+          },
+        },
+        returns: {
+          include: {
+            items: true,
+          },
+        },
       },
     });
     res.json(invoices);
@@ -26,15 +61,23 @@ router.get('/', async (req, res) => {
   }
 });
 
-// GET /invoices/:id - fetch single invoice with details
+// GET /invoices/:id - fetch single invoice with flexible number / id lookup
 router.get('/:id', async (req, res) => {
   try {
-    const invoice = await prisma.invoice.findFirst({
+    const queryParam = req.params.id.trim();
+    const orConditions = [
+      { id: queryParam },
+      { invoiceNumber: { equals: queryParam, mode: 'insensitive' } },
+    ];
+
+    // If user passed a number like "1" or "1001", try matching "INV-1" or "INV-1001"
+    if (!queryParam.toUpperCase().startsWith('INV-')) {
+      orConditions.push({ invoiceNumber: { equals: `INV-${queryParam}`, mode: 'insensitive' } });
+    }
+
+    let invoice = await prisma.invoice.findFirst({
       where: {
-        OR: [
-          { id: req.params.id },
-          { invoiceNumber: req.params.id },
-        ],
+        OR: orConditions,
       },
       include: {
         customer: true,
@@ -50,6 +93,33 @@ router.get('/:id', async (req, res) => {
         },
       },
     });
+
+    // Fallback: If not found by exact, try partial match (contains)
+    if (!invoice) {
+      invoice = await prisma.invoice.findFirst({
+        where: {
+          OR: [
+            { invoiceNumber: { contains: queryParam, mode: 'insensitive' } },
+            { customer: { name: { contains: queryParam, mode: 'insensitive' } } },
+            { customer: { mobile: { contains: queryParam } } },
+          ],
+        },
+        include: {
+          customer: true,
+          items: {
+            include: {
+              product: true,
+            },
+          },
+          returns: {
+            include: {
+              items: true,
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+    }
 
     if (!invoice) {
       return res.status(404).json({ error: 'Invoice not found' });
