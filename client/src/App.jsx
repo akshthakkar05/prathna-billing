@@ -24,6 +24,10 @@ import {
   Eye,
   FileText,
   Upload,
+  Menu,
+  TrendingUp,
+  Users,
+  Zap,
 } from 'lucide-react';
 
 // Reference map of all 37 Indian GST State/UT codes
@@ -157,6 +161,7 @@ export default function App() {
 
   // Navigation tabs: 'dashboard' | 'invoice' | 'purchase' | 'product' | 'customer' | 'supplier' | 'reports' | 'settings'
   const [activeTab, setActiveTab] = useState(() => getInitialNavigation().tab);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Core collections
   const [products, setProducts] = useState([]);
@@ -165,6 +170,13 @@ export default function App() {
   const [purchases, setPurchases] = useState([]);
   const [invoices, setInvoices] = useState([]);
   const [dashboardSummary, setDashboardSummary] = useState(null);
+  const [dashboardRange, setDashboardRange] = useState('today');
+  const [dashboardCustomStart, setDashboardCustomStart] = useState('');
+  const [dashboardCustomEnd, setDashboardCustomEnd] = useState('');
+  const [salesTrend, setSalesTrend] = useState(null);
+  const [salesTrendRange, setSalesTrendRange] = useState('7d');
+  const [loadingDashboard, setLoadingDashboard] = useState(false);
+  const [hoveredTrendBar, setHoveredTrendBar] = useState(null);
   const [companySettings, setCompanySettings] = useState({
     name: '',
     address: '',
@@ -202,6 +214,15 @@ export default function App() {
     state: '24', // Default to Gujarat (code: 24)
   });
   const [creatingCustomer, setCreatingCustomer] = useState(false);
+  const [showQuickCustomerModal, setShowQuickCustomerModal] = useState(false);
+  const [quickCustForm, setQuickCustForm] = useState({
+    name: '',
+    mobile: '',
+    address: '',
+    gstin: '',
+    state: '24',
+  });
+  const [savingQuickCust, setSavingQuickCust] = useState(false);
 
   // Form: Create Supplier
   const [supplierForm, setSupplierForm] = useState({
@@ -213,6 +234,16 @@ export default function App() {
     notes: '',
   });
   const [creatingSupplier, setCreatingSupplier] = useState(false);
+  const [showQuickSupplierModal, setShowQuickSupplierModal] = useState(false);
+  const [quickSuppForm, setQuickSuppForm] = useState({
+    name: '',
+    mobile: '',
+    address: '',
+    gstin: '',
+    pan: '',
+    notes: '',
+  });
+  const [savingQuickSupp, setSavingQuickSupp] = useState(false);
 
   // Form: Create Purchase
   const [selectedSupplierId, setSelectedSupplierId] = useState('');
@@ -437,7 +468,7 @@ export default function App() {
     setLoadingInitial(true);
     setDataLoadError('');
     try {
-      const [pRes, cRes, sRes, puRes, setRes, dashRes, recRes, invRes] = await Promise.all([
+      const [pRes, cRes, sRes, puRes, setRes, dashRes, recRes, invRes, trendRes] = await Promise.all([
         authFetch('/products'),
         authFetch('/customers'),
         authFetch('/suppliers'),
@@ -446,9 +477,10 @@ export default function App() {
         authFetch('/dashboard/summary'),
         authFetch('/customers/recent').catch(() => null),
         authFetch('/invoices').catch(() => null),
+        authFetch('/dashboard/sales-trend?range=7d').catch(() => null),
       ]);
 
-      const [pData, cData, sData, puData, setData, dashData, recData, invData] = await Promise.all([
+      const [pData, cData, sData, puData, setData, dashData, recData, invData, trendData] = await Promise.all([
         pRes.json(),
         cRes.json(),
         sRes.json(),
@@ -457,6 +489,7 @@ export default function App() {
         dashRes.json(),
         recRes ? recRes.json().catch(() => []) : [],
         invRes ? invRes.json().catch(() => []) : [],
+        trendRes ? trendRes.json().catch(() => null) : null,
       ]);
 
       setProducts(Array.isArray(pData) ? pData : []);
@@ -470,6 +503,9 @@ export default function App() {
         setDashboardSummary(dashData);
       } else {
         setDataLoadError("Couldn't load dashboard summary — try refreshing");
+      }
+      if (trendData && !trendData.error) {
+        setSalesTrend(trendData);
       }
 
       if (Array.isArray(cData) && cData.length > 0 && !selectedCustomerId) {
@@ -487,6 +523,45 @@ export default function App() {
       }
     } finally {
       setLoadingInitial(false);
+    }
+  };
+
+  // Switch operational dashboard date range (affects KPI cards and trend chart together)
+  const handleSelectDashboardRange = async (range, customStart, customEnd) => {
+    setDashboardRange(range);
+    setLoadingDashboard(true);
+    try {
+      let query = `?range=${range}`;
+      if (range === 'custom' && customStart && customEnd) {
+        query += `&startDate=${customStart}&endDate=${customEnd}`;
+      }
+      const trendParam = range === 'today' ? 'today' : range === 'this_month' ? 'this_month' : range === 'last_month' ? '30d' : '7d';
+      setSalesTrendRange(trendParam);
+
+      const [dashRes, trendRes] = await Promise.all([
+        authFetch(`/dashboard/summary${query}`),
+        authFetch(`/dashboard/sales-trend?range=${trendParam}`),
+      ]);
+      const [dashData, trendData] = await Promise.all([dashRes.json(), trendRes.json()]);
+      if (dashData && !dashData.error) setDashboardSummary(dashData);
+      if (trendData && !trendData.error) setSalesTrend(trendData);
+    } catch (err) {
+      console.warn('Failed to reload dashboard for range:', err);
+      showToast('Could not update date range data', 'error');
+    } finally {
+      setLoadingDashboard(false);
+    }
+  };
+
+  // Switch sales trend chart range independently
+  const handleSelectTrendRange = async (range) => {
+    setSalesTrendRange(range);
+    try {
+      const res = await authFetch(`/dashboard/sales-trend?range=${range}`);
+      const data = await res.json();
+      if (data && !data.error) setSalesTrend(data);
+    } catch (err) {
+      console.warn('Failed to update sales trend:', err);
     }
   };
 
@@ -510,6 +585,13 @@ export default function App() {
         console.warn('Failed to fetch public auth/branding status:', err);
       });
   }, []);
+
+  // Synchronize browser tab title with company name
+  useEffect(() => {
+    if (companySettings?.name) {
+      document.title = companySettings.name;
+    }
+  }, [companySettings?.name]);
 
   useEffect(() => {
     if (token) {
@@ -685,13 +767,79 @@ export default function App() {
       if (!res.ok) throw new Error(data.error || 'Failed to add customer');
 
       showToast(`Customer "${data.name}" added successfully!`, 'success');
-      setCustomerForm({ name: '', mobile: '', address: '', gstin: '' });
+      setCustomerForm({ name: '', mobile: '', address: '', gstin: '', state: '24' });
       await loadData();
       setSelectedCustomerId(data.id);
     } catch (err) {
       showToast(err.message, 'error');
     } finally {
       setCreatingCustomer(false);
+    }
+  };
+
+  // Instant one-click Walk-in / Cash Customer handler
+  const handleQuickWalkInCustomer = async () => {
+    try {
+      const existing = customers.find((c) =>
+        c.name.toLowerCase().includes('walk-in') ||
+        c.name.toLowerCase().includes('cash')
+      );
+      if (existing) {
+        setSelectedCustomerId(existing.id);
+        setTaxTypeManualOverride(false);
+        showToast(`Selected "${existing.name}" for this invoice`, 'success');
+        return;
+      }
+
+      const res = await authFetch('/customers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Walk-in Customer (Cash)',
+          state: '24', // Gujarat
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to create walk-in customer');
+
+      await loadData();
+      setSelectedCustomerId(data.id);
+      setTaxTypeManualOverride(false);
+      showToast('Walk-in Cash Customer created and selected!', 'success');
+    } catch (err) {
+      showToast(err.message || 'Failed to set walk-in customer', 'error');
+    }
+  };
+
+  // Handle Quick Add Customer Modal submission on Invoice page
+  const handleSaveQuickCustomer = async (e) => {
+    e.preventDefault();
+    if (!quickCustForm.name.trim()) {
+      showToast('Customer name is required', 'error');
+      return;
+    }
+
+    setSavingQuickCust(true);
+    try {
+      const res = await authFetch('/customers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(quickCustForm),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to create customer');
+
+      showToast(`Customer "${data.name}" added and selected!`, 'success');
+      setQuickCustForm({ name: '', mobile: '', address: '', gstin: '', state: '24' });
+      setShowQuickCustomerModal(false);
+      await loadData();
+      setSelectedCustomerId(data.id);
+      setTaxTypeManualOverride(false);
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setSavingQuickCust(false);
     }
   };
 
@@ -722,6 +870,37 @@ export default function App() {
       showToast(err.message, 'error');
     } finally {
       setCreatingSupplier(false);
+    }
+  };
+
+  // Handle Quick Add Supplier Modal submission on Inward Purchase screen
+  const handleSaveQuickSupplier = async (e) => {
+    e.preventDefault();
+    if (!quickSuppForm.name.trim()) {
+      showToast('Supplier name is required', 'error');
+      return;
+    }
+
+    setSavingQuickSupp(true);
+    try {
+      const res = await authFetch('/suppliers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(quickSuppForm),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to add supplier');
+
+      showToast(`Supplier "${data.name}" added and selected!`, 'success');
+      setQuickSuppForm({ name: '', mobile: '', address: '', gstin: '', pan: '', notes: '' });
+      setShowQuickSupplierModal(false);
+      await loadData();
+      setSelectedSupplierId(data.id);
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setSavingQuickSupp(false);
     }
   };
 
@@ -1206,7 +1385,7 @@ export default function App() {
                   className="form-input"
                   value={registerForm.name}
                   onChange={(e) => setRegisterForm({ ...registerForm, name: e.target.value })}
-                  placeholder="e.g. Ramesh Patel"
+                  placeholder="Full Name (e.g. Prathna Staff)"
                   required
                 />
               </div>
@@ -1218,7 +1397,7 @@ export default function App() {
                   className="form-input"
                   value={registerForm.email}
                   onChange={(e) => setRegisterForm({ ...registerForm, email: e.target.value })}
-                  placeholder="e.g. owner@example.com"
+                  placeholder="Email Address (e.g. admin@prathna.com)"
                   required
                 />
               </div>
@@ -1230,7 +1409,7 @@ export default function App() {
                   className="form-input"
                   value={registerForm.password}
                   onChange={(e) => setRegisterForm({ ...registerForm, password: e.target.value })}
-                  placeholder="At least 6 characters"
+                  placeholder="Create a password (min 6 characters)"
                   required
                 />
               </div>
@@ -1259,7 +1438,7 @@ export default function App() {
                   className="form-input"
                   value={loginForm.email}
                   onChange={(e) => setLoginForm({ ...loginForm, email: e.target.value })}
-                  placeholder="e.g. admin@example.com"
+                  placeholder="e.g. admin@prathna.com"
                   required
                 />
               </div>
@@ -1271,7 +1450,7 @@ export default function App() {
                   className="form-input"
                   value={loginForm.password}
                   onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
-                  placeholder="••••••••"
+                  placeholder="Enter your account password"
                   required
                 />
               </div>
@@ -1297,6 +1476,12 @@ export default function App() {
     );
   }
 
+  // Handle navigation click and auto-close mobile drawer
+  const handleNavClick = (tab) => {
+    setActiveTab(tab);
+    setMobileMenuOpen(false);
+  };
+
   // =========================================================================
   // AUTHENTICATED APP SHELL: SIDEBAR + MAIN CONTENT
   // =========================================================================
@@ -1312,20 +1497,125 @@ export default function App() {
         </div>
       )}
 
-      {/* LEFT SIDEBAR NAVIGATION */}
-      <aside className="sidebar">
-        <div className="sidebar-header">
+      {/* Mobile Top Navigation Bar (visible on tablets & phones <= 1024px) */}
+      <header className="mobile-topbar">
+        <button
+          type="button"
+          className="mobile-menu-btn"
+          onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+          aria-label="Toggle navigation menu"
+        >
+          {mobileMenuOpen ? <X size={22} /> : <Menu size={22} />}
+        </button>
+        <div className="mobile-brand">
           {companySettings.logoUrl ? (
             <img
               src={companySettings.logoUrl}
               alt={companySettings.name || 'Company Logo'}
-              className="sidebar-logo"
+              className="mobile-brand-logo"
             />
           ) : (
-            <div className="sidebar-title">{companySettings.name || 'Your Company Name'}</div>
+            <span className="mobile-brand-title">{companySettings.name || 'Prathna Enterprises'}</span>
           )}
-          <div className="sidebar-subtitle">Billing & Inventory</div>
         </div>
+        <button
+          type="button"
+          className="btn-logout mobile-logout-btn"
+          onClick={() => handleLogout()}
+          title="Log out of billing counter"
+        >
+          <LogOut size={13} />
+        </button>
+      </header>
+
+      {/* Mobile Drawer Backdrop Overlay */}
+      {mobileMenuOpen && (
+        <div
+          className="sidebar-backdrop"
+          onClick={() => setMobileMenuOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
+      {/* LEFT SIDEBAR NAVIGATION (Desktop Column / Mobile Off-canvas Drawer) */}
+      <aside className={`sidebar ${mobileMenuOpen ? 'sidebar-open' : ''}`}>
+        <div className="sidebar-header">
+          <div className="sidebar-header-top">
+            {companySettings.logoUrl ? (
+              <img
+                src={companySettings.logoUrl}
+                alt={companySettings.name || 'Company Logo'}
+                className="sidebar-logo"
+              />
+            ) : (
+              <div className="sidebar-title">{companySettings.name || 'Your Company Name'}</div>
+            )}
+            <button
+              type="button"
+              className="mobile-close-btn"
+              onClick={() => setMobileMenuOpen(false)}
+              aria-label="Close navigation menu"
+            >
+              <X size={20} />
+            </button>
+          </div>
+        </div>
+
+        <nav className="sidebar-nav">
+          <button
+            className={`nav-item ${activeTab === 'dashboard' ? 'active' : ''}`}
+            onClick={() => handleNavClick('dashboard')}
+          >
+            <LayoutDashboard size={18} /> Dashboard
+          </button>
+          <button
+            className={`nav-item ${activeTab === 'invoice' ? 'active' : ''}`}
+            onClick={() => handleNavClick('invoice')}
+          >
+            <Receipt size={18} /> Invoices
+          </button>
+          <button
+            className={`nav-item ${activeTab === 'purchase' ? 'active' : ''}`}
+            onClick={() => handleNavClick('purchase')}
+          >
+            <Truck size={18} /> Purchases
+          </button>
+          <button
+            className={`nav-item ${activeTab === 'product' ? 'active' : ''}`}
+            onClick={() => handleNavClick('product')}
+          >
+            <Package size={18} /> Products
+            {dashboardSummary?.lowStockProducts?.length > 0 && (
+              <span className="nav-badge-alert" title={`${dashboardSummary.lowStockProducts.length} items low on stock`}>
+                {dashboardSummary.lowStockProducts.length} low
+              </span>
+            )}
+          </button>
+          <button
+            className={`nav-item ${activeTab === 'customer' ? 'active' : ''}`}
+            onClick={() => handleNavClick('customer')}
+          >
+            <UserPlus size={18} /> Customers
+          </button>
+          <button
+            className={`nav-item ${activeTab === 'supplier' ? 'active' : ''}`}
+            onClick={() => handleNavClick('supplier')}
+          >
+            <Building2 size={18} /> Suppliers
+          </button>
+          <button
+            className={`nav-item ${activeTab === 'reports' ? 'active' : ''}`}
+            onClick={() => handleNavClick('reports')}
+          >
+            <BarChart3 size={18} /> Reports
+          </button>
+          <button
+            className={`nav-item ${activeTab === 'settings' ? 'active' : ''}`}
+            onClick={() => handleNavClick('settings')}
+          >
+            <Settings size={18} /> Settings
+          </button>
+        </nav>
 
         {currentUser && (
           <div className="sidebar-user-box">
@@ -1340,62 +1630,6 @@ export default function App() {
             </button>
           </div>
         )}
-
-        <nav className="sidebar-nav">
-          <button
-            className={`nav-item ${activeTab === 'dashboard' ? 'active' : ''}`}
-            onClick={() => setActiveTab('dashboard')}
-          >
-            <LayoutDashboard size={18} /> Dashboard
-          </button>
-          <button
-            className={`nav-item ${activeTab === 'invoice' ? 'active' : ''}`}
-            onClick={() => setActiveTab('invoice')}
-          >
-            <Receipt size={18} /> Invoices
-          </button>
-          <button
-            className={`nav-item ${activeTab === 'purchase' ? 'active' : ''}`}
-            onClick={() => setActiveTab('purchase')}
-          >
-            <Truck size={18} /> Purchases
-          </button>
-          <button
-            className={`nav-item ${activeTab === 'product' ? 'active' : ''}`}
-            onClick={() => setActiveTab('product')}
-          >
-            <Package size={18} /> Products
-            {dashboardSummary?.lowStockProducts?.length > 0 && (
-              <span className="nav-badge-alert" title={`${dashboardSummary.lowStockProducts.length} items low on stock`}>
-                {dashboardSummary.lowStockProducts.length} low
-              </span>
-            )}
-          </button>
-          <button
-            className={`nav-item ${activeTab === 'customer' ? 'active' : ''}`}
-            onClick={() => setActiveTab('customer')}
-          >
-            <UserPlus size={18} /> Customers
-          </button>
-          <button
-            className={`nav-item ${activeTab === 'supplier' ? 'active' : ''}`}
-            onClick={() => setActiveTab('supplier')}
-          >
-            <Building2 size={18} /> Suppliers
-          </button>
-          <button
-            className={`nav-item ${activeTab === 'reports' ? 'active' : ''}`}
-            onClick={() => setActiveTab('reports')}
-          >
-            <BarChart3 size={18} /> Reports
-          </button>
-          <button
-            className={`nav-item ${activeTab === 'settings' ? 'active' : ''}`}
-            onClick={() => setActiveTab('settings')}
-          >
-            <Settings size={18} /> Settings
-          </button>
-        </nav>
       </aside>
 
       {/* MAIN CONTENT AREA */}
@@ -1417,14 +1651,114 @@ export default function App() {
         )}
 
         {/* ========================================================================= */}
-        {/* TAB 1: DASHBOARD */}
+        {/* TAB 1: OPERATIONAL DASHBOARD */}
         {/* ========================================================================= */}
         {activeTab === 'dashboard' && (
           <div>
-            <div className="page-header">
-              <h1 className="page-title">Store Dashboard</h1>
-              <p className="page-subtitle">Overview of today's sales, stock levels, and recent transactions</p>
+            {/* Top Operational Header & Dominant Quick Action */}
+            <div className="dashboard-top-banner">
+              <div className="dashboard-title-area">
+                {companySettings.logoUrl && (
+                  <img
+                    src={companySettings.logoUrl}
+                    alt={companySettings.name || 'Company Logo'}
+                    className="dashboard-brand-badge"
+                  />
+                )}
+                <div>
+                  <h1 className="page-title" style={{ marginBottom: 2 }}>{companySettings.name || 'Prathna Enterprises'}</h1>
+                  <p className="page-subtitle">Store Billing Counter — Operational Dashboard</p>
+                </div>
+              </div>
+
+              {/* Dominant Primary Action: + New Bill */}
+              <button
+                type="button"
+                className="btn-new-bill-primary"
+                onClick={() => handleNavClick('invoice')}
+                title="Create a new GST sales invoice"
+              >
+                <Plus size={20} /> + New Bill
+              </button>
             </div>
+
+            {/* Unified Date Range Selector Bar */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginBottom: 20 }}>
+              <div className="date-range-pills">
+                {[
+                  { key: 'today', label: 'Today' },
+                  { key: 'yesterday', label: 'Yesterday' },
+                  { key: 'this_week', label: 'This Week' },
+                  { key: 'this_month', label: 'This Month' },
+                  { key: 'last_month', label: 'Last Month' },
+                  { key: 'custom', label: 'Custom Range' },
+                ].map((item) => (
+                  <button
+                    key={item.key}
+                    type="button"
+                    className={`date-range-pill ${dashboardRange === item.key ? 'active' : ''}`}
+                    onClick={() => handleSelectDashboardRange(item.key, dashboardCustomStart, dashboardCustomEnd)}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Secondary Quick Actions */}
+              <div className="quick-actions-bar" style={{ marginBottom: 0 }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => handleNavClick('purchase')}
+                >
+                  <Truck size={14} /> + New Purchase
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => handleNavClick('customer')}
+                >
+                  <UserPlus size={14} /> + Add Customer
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => handleNavClick('product')}
+                >
+                  <Package size={14} /> + Add Product
+                </button>
+              </div>
+            </div>
+
+            {/* Custom Date Range Picker Inputs (shown when Custom is selected) */}
+            {dashboardRange === 'custom' && (
+              <div className="card" style={{ marginBottom: 20, padding: 14, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', backgroundColor: 'var(--bg-canvas)' }}>
+                <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>Custom Range:</span>
+                <input
+                  type="date"
+                  className="form-control"
+                  style={{ width: 'auto', padding: '6px 10px', fontSize: '0.875rem' }}
+                  value={dashboardCustomStart}
+                  onChange={(e) => setDashboardCustomStart(e.target.value)}
+                />
+                <span style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>to</span>
+                <input
+                  type="date"
+                  className="form-control"
+                  style={{ width: 'auto', padding: '6px 10px', fontSize: '0.875rem' }}
+                  value={dashboardCustomEnd}
+                  onChange={(e) => setDashboardCustomEnd(e.target.value)}
+                />
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  onClick={() => handleSelectDashboardRange('custom', dashboardCustomStart, dashboardCustomEnd)}
+                  disabled={!dashboardCustomStart || !dashboardCustomEnd}
+                >
+                  Apply Filter
+                </button>
+              </div>
+            )}
 
             {/* Error Banner with Retry */}
             {dataLoadError && (
@@ -1442,77 +1776,336 @@ export default function App() {
               </div>
             )}
 
-            {/* Loading State (Never stuck spinner) */}
-            {loadingInitial && !dataLoadError && (
-              <div className="loading-state">
-                <RefreshCw size={28} className="spin" style={{ color: 'var(--primary)', marginBottom: '12px' }} />
-                <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: '4px' }}>Loading dashboard summary...</div>
-                <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>Retrieving daily sales totals and inventory status</div>
+            {/* Loading State */}
+            {(loadingInitial || loadingDashboard) && !dataLoadError && (
+              <div className="loading-state" style={{ padding: '30px' }}>
+                <RefreshCw size={26} className="spin" style={{ color: 'var(--primary)', marginBottom: '10px' }} />
+                <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: '4px' }}>Updating operational metrics...</div>
+                <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>Calculating live sales and stock figures</div>
               </div>
             )}
 
-            {/* Missing Data Fallback */}
-            {!loadingInitial && !dataLoadError && !dashboardSummary && (
-              <div className="banner banner-warning" style={{ marginBottom: '24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <AlertCircle size={22} style={{ flexShrink: 0 }} />
-                  <span>Couldn't load dashboard summary — try refreshing</span>
-                </div>
-                <button className="btn btn-secondary btn-sm" onClick={loadData} style={{ background: '#FFFFFF', whiteSpace: 'nowrap' }}>
-                  <RefreshCw size={14} /> Try again
-                </button>
-              </div>
-            )}
-
-            {/* Metric Cards & Data (rendered when dashboardSummary is available) */}
+            {/* 3 Top Operational KPI Cards */}
             {dashboardSummary && !loadingInitial && (
               <>
-                {/* Metric Cards */}
-                <div className="stats-grid">
-                  <div className="stat-card">
-                    <div className="stat-label">Today's Sales</div>
-                    <div className="stat-value">₹{Number(dashboardSummary?.todaySales?.totalAmount || 0).toLocaleString('en-IN')}</div>
-                    <div className="stat-hint">{dashboardSummary?.todaySales?.invoiceCount || 0} invoices created today</div>
-                  </div>
-
-                  <div className="stat-card">
-                    <div className="stat-label">Total Stock Value</div>
-                    <div className="stat-value">₹{Number(dashboardSummary?.inventoryValuation || 0).toLocaleString('en-IN')}</div>
-                    <div className="stat-hint">Calculated across {products.length} catalog items</div>
-                  </div>
-
-                  <div className="stat-card">
-                    <div className="stat-label">Low Stock Alerts</div>
-                    <div className="stat-value" style={{ color: (dashboardSummary?.lowStockProducts?.length || 0) > 0 ? 'var(--status-warning)' : 'var(--text-primary)' }}>
-                      {dashboardSummary?.lowStockProducts?.length || 0}
+                <div className="dashboard-kpi-grid">
+                  {/* Card 1: Sales for Selected Period */}
+                  <div className="kpi-card">
+                    <div className="kpi-label">
+                      <span>{dashboardSummary?.periodSales?.rangeLabel || "Today's Sales"}</span>
+                      <Receipt size={16} style={{ color: 'var(--primary)' }} />
                     </div>
-                    <div className="stat-hint">Products at or below minimum stock</div>
+                    <div className="kpi-value">
+                      ₹{Number(dashboardSummary?.periodSales?.totalAmount ?? dashboardSummary?.todaySales?.totalAmount ?? 0).toLocaleString('en-IN')}
+                    </div>
+                    <div className="kpi-hint">
+                      {dashboardSummary?.periodSales?.invoiceCount ?? dashboardSummary?.todaySales?.invoiceCount ?? 0} bills generated in this period
+                    </div>
+                  </div>
+
+                  {/* Card 2: Bills Count in Selected Period */}
+                  <div className="kpi-card">
+                    <div className="kpi-label">
+                      <span>Bills ({dashboardSummary?.periodSales?.rangeLabel?.replace("'s Sales", "") || 'Today'})</span>
+                      <FileText size={16} style={{ color: 'var(--primary)' }} />
+                    </div>
+                    <div className="kpi-value">
+                      {dashboardSummary?.periodSales?.invoiceCount ?? dashboardSummary?.todaySales?.invoiceCount ?? 0}
+                    </div>
+                    <div className="kpi-hint">
+                      {Number(dashboardSummary?.periodSales?.invoiceCount || 0) > 0
+                        ? `Avg ₹${Math.round(Number(dashboardSummary?.periodSales?.totalAmount || 0) / Number(dashboardSummary.periodSales.invoiceCount)).toLocaleString('en-IN')} / bill`
+                        : 'All settled in full (zero credit sales)'}
+                    </div>
+                  </div>
+
+                  {/* Card 3: Current Stock Valuation */}
+                  <div className="kpi-card">
+                    <div className="kpi-label">
+                      <span>Current Stock Value</span>
+                      <Package size={16} style={{ color: 'var(--status-success)' }} />
+                    </div>
+                    <div className="kpi-value" style={{ color: 'var(--status-success)' }}>
+                      ₹{Number(dashboardSummary?.stockSummary?.totalStockValue || 0).toLocaleString('en-IN')}
+                    </div>
+                    <div className="kpi-hint">
+                      Live valuation across {dashboardSummary?.stockSummary?.totalProductsCount || products.length} catalog items
+                    </div>
                   </div>
                 </div>
 
-                {/* Low Stock Warning Banner */}
-                {dashboardSummary?.lowStockProducts && dashboardSummary.lowStockProducts.length > 0 && (
-                  <div className="banner banner-warning">
-                    <AlertTriangle size={20} style={{ flexShrink: 0, marginTop: '2px' }} />
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 600, marginBottom: '2px' }}>
-                        {dashboardSummary.lowStockProducts.length} items are running low on stock
+                {/* Sales Trend Chart Card */}
+                <div className="trend-chart-card">
+                  <div className="trend-chart-header">
+                    <div>
+                      <div style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <TrendingUp size={18} style={{ color: 'var(--primary)' }} />
+                        Sales Trend — {salesTrend?.rangeLabel || 'Daily Revenue'}
                       </div>
-                      <div>
-                        {dashboardSummary.lowStockProducts.map((p) => `${p.name} (${Number(p.currentStock)} left)`).join(', ')}
+                      <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', marginTop: 2 }}>
+                        Total Revenue: ₹{Number(salesTrend?.totalAmount || 0).toLocaleString('en-IN')} across {salesTrend?.totalCount || 0} bills
                       </div>
                     </div>
-                    <button className="btn btn-secondary btn-sm" onClick={() => setActiveTab('purchase')}>
-                      Restock Now
-                    </button>
-                  </div>
-                )}
 
-                {/* Recent Invoices Table */}
+                    <div className="trend-range-selector">
+                      {[
+                        { key: 'today', label: 'Today' },
+                        { key: '7d', label: '7 Days' },
+                        { key: '30d', label: '30 Days' },
+                        { key: 'this_month', label: 'This Month' },
+                      ].map((tb) => (
+                        <button
+                          key={tb.key}
+                          type="button"
+                          className={`trend-range-btn ${salesTrendRange === tb.key ? 'active' : ''}`}
+                          onClick={() => handleSelectTrendRange(tb.key)}
+                        >
+                          {tb.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* SVG Bar Chart */}
+                  {salesTrend?.trend && salesTrend.trend.length > 0 ? (() => {
+                    const trend = salesTrend.trend;
+                    const maxVal = Math.max(...trend.map((t) => t.amount), 100);
+                    const chartHeight = 160;
+                    const chartPaddingTop = 15;
+                    const chartPaddingBottom = 35;
+                    const svgTotalHeight = chartHeight + chartPaddingTop + chartPaddingBottom;
+                    const svgTotalWidth = 720;
+                    const chartWidth = svgTotalWidth - 70;
+                    const slotWidth = chartWidth / trend.length;
+                    const barWidth = Math.max(Math.min(slotWidth * 0.65, 42), 8);
+
+                    return (
+                      <div style={{ width: '100%', overflowX: 'auto' }}>
+                        <svg
+                          viewBox={`0 0 ${svgTotalWidth} ${svgTotalHeight}`}
+                          style={{ width: '100%', minWidth: trend.length > 15 ? 700 : '100%', height: 'auto', display: 'block' }}
+                        >
+                          {/* Horizontal Gridlines */}
+                          {[0, 0.33, 0.66, 1].map((ratio, idx) => {
+                            const y = chartPaddingTop + chartHeight * (1 - ratio);
+                            const val = Math.round(maxVal * ratio);
+                            return (
+                              <g key={idx}>
+                                <line
+                                  x1={60}
+                                  y1={y}
+                                  x2={svgTotalWidth - 10}
+                                  y2={y}
+                                  stroke="var(--border)"
+                                  strokeDasharray="3 3"
+                                  strokeWidth="1"
+                                />
+                                <text
+                                  x={52}
+                                  y={y + 4}
+                                  textAnchor="end"
+                                  fontSize="10"
+                                  fill="var(--text-secondary)"
+                                >
+                                  ₹{val >= 1000 ? `${(val / 1000).toFixed(val % 1000 === 0 ? 0 : 1)}k` : val}
+                                </text>
+                              </g>
+                            );
+                          })}
+
+                          {/* Bars */}
+                          {trend.map((item, index) => {
+                            const x = 60 + index * slotWidth + (slotWidth - barWidth) / 2;
+                            const barH = item.amount > 0 ? Math.max((item.amount / maxVal) * chartHeight, 4) : 2;
+                            const y = chartPaddingTop + chartHeight - barH;
+                            const isHovered = hoveredTrendBar === index;
+
+                            return (
+                              <g
+                                key={item.date}
+                                onMouseEnter={() => setHoveredTrendBar(index)}
+                                onMouseLeave={() => setHoveredTrendBar(null)}
+                                style={{ cursor: 'pointer' }}
+                              >
+                                <rect
+                                  x={x}
+                                  y={y}
+                                  width={barWidth}
+                                  height={barH}
+                                  rx={4}
+                                  fill={isHovered ? 'var(--primary-hover)' : item.amount > 0 ? 'var(--primary)' : 'var(--border)'}
+                                  opacity={item.amount > 0 ? 0.92 : 0.6}
+                                />
+                                {/* X-axis Label (shows every item if <= 10 items, or alternate for 30d) */}
+                                {(trend.length <= 12 || index % Math.ceil(trend.length / 10) === 0 || index === trend.length - 1) && (
+                                  <text
+                                    x={x + barWidth / 2}
+                                    y={svgTotalHeight - 12}
+                                    textAnchor="middle"
+                                    fontSize="10"
+                                    fill={isHovered ? 'var(--primary)' : 'var(--text-secondary)'}
+                                    fontWeight={isHovered ? '700' : '500'}
+                                  >
+                                    {item.label}
+                                  </text>
+                                )}
+                              </g>
+                            );
+                          })}
+                        </svg>
+
+                        {/* Interactive Tooltip Details */}
+                        <div style={{ minHeight: 24, textAlign: 'center', marginTop: 8, fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
+                          {hoveredTrendBar !== null && trend[hoveredTrendBar] ? (
+                            <span style={{ fontWeight: 600, color: 'var(--primary)' }}>
+                              {trend[hoveredTrendBar].label} ({trend[hoveredTrendBar].weekday}): ₹{Number(trend[hoveredTrendBar].amount).toLocaleString('en-IN')} revenue across {trend[hoveredTrendBar].count} bill(s)
+                            </span>
+                          ) : (
+                            <span>Hover or tap on any bar to see daily revenue details</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })() : (
+                    <div style={{ textAlign: 'center', padding: '30px', color: 'var(--text-secondary)' }}>
+                      No sales data recorded in this period.
+                    </div>
+                  )}
+                </div>
+
+                {/* Dual Grid: Stock Overview Table & Frequent Customers */}
+                <div className="dashboard-dual-grid">
+                  {/* Left: Stock Overview Table (All 3 Products) */}
+                  <div className="card">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                      <h2 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <Package size={17} style={{ color: 'var(--primary)' }} />
+                        Stock Overview ({dashboardSummary?.stockOverview?.length || products.length} Products)
+                      </h2>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => handleNavClick('product')}
+                        title="View product stock details"
+                      >
+                        Manage Stock
+                      </button>
+                    </div>
+
+                    {/* Low Stock Summary Alert */}
+                    {dashboardSummary?.stockSummary?.lowStockCount > 0 && (
+                      <div className="banner banner-warning" style={{ padding: '8px 12px', marginBottom: 14, fontSize: '0.8125rem' }}>
+                        <AlertTriangle size={15} style={{ flexShrink: 0 }} />
+                        <span><strong>Low stock:</strong> {dashboardSummary.stockSummary.lowStockCount} product(s) at or below threshold.</span>
+                      </div>
+                    )}
+
+                    {dashboardSummary?.stockOverview && dashboardSummary.stockOverview.length > 0 ? (
+                      <div className="table-container">
+                        <table className="data-table">
+                          <thead>
+                            <tr>
+                              <th>Product</th>
+                              <th style={{ textAlign: 'center' }}>Stock</th>
+                              <th style={{ textAlign: 'right' }}>Status</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {dashboardSummary.stockOverview.map((prod) => (
+                              <tr
+                                key={prod.id}
+                                className="stock-table-clickable-row"
+                                onClick={() => handleNavClick('product')}
+                                title="Click to view product details"
+                              >
+                                <td style={{ fontWeight: 600 }}>{prod.name}</td>
+                                <td style={{ textAlign: 'center', fontWeight: 600 }}>
+                                  {prod.currentStock} {prod.unit || 'PCS'}
+                                </td>
+                                <td style={{ textAlign: 'right' }}>
+                                  {prod.status === 'Low' ? (
+                                    <span className="stock-status-low">Low</span>
+                                  ) : (
+                                    <span className="stock-status-healthy">Healthy</span>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <div style={{ textAlign: 'center', padding: '20px', color: 'var(--text-secondary)' }}>
+                        No products cataloged yet.
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Right: Frequent / Recent Customers (Reusing /customers/recent data) */}
+                  <div className="card">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                      <h2 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <Users size={17} style={{ color: 'var(--primary)' }} />
+                        Frequent & Recent Customers
+                      </h2>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => handleNavClick('customer')}
+                      >
+                        All Customers
+                      </button>
+                    </div>
+
+                    <p style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', marginBottom: 12 }}>
+                      Regular shop counter clients and recent repeat purchasers
+                    </p>
+
+                    {recentCustomers && recentCustomers.length > 0 ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        {recentCustomers.slice(0, 5).map((cust) => (
+                          <div
+                            key={cust.id}
+                            className="frequent-customer-item"
+                            onClick={() => {
+                              setSelectedCustomerId(cust.id);
+                              handleNavClick('invoice');
+                            }}
+                            title={`Click to start a new bill for ${cust.name}`}
+                          >
+                            <div>
+                              <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>{cust.name}</div>
+                              <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                                {cust.mobile || 'No mobile'} {cust.lastInvoicedAt ? `• Invoiced ${new Date(cust.lastInvoicedAt).toLocaleDateString('en-IN')}` : ''}
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              style={{ padding: '4px 10px', fontSize: '0.75rem' }}
+                            >
+                              + Bill
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div style={{ textAlign: 'center', padding: '24px', color: 'var(--text-secondary)' }}>
+                        <div style={{ fontSize: '0.875rem', marginBottom: 4 }}>No recent repeat customers recorded yet</div>
+                        <div style={{ fontSize: '0.75rem' }}>Customers invoiced at the counter will appear here for fast re-billing.</div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Recent Invoices Table (10 Last Invoices) */}
                 <div className="card">
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                    <h2 style={{ fontSize: '1.125rem', fontWeight: 600 }}>Recent Invoices</h2>
-                    <button className="btn btn-primary btn-sm" onClick={() => setActiveTab('invoice')}>
+                    <h2 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <Receipt size={17} style={{ color: 'var(--primary)' }} />
+                      Recent Invoices
+                    </h2>
+                    <button className="btn btn-primary btn-sm" onClick={() => handleNavClick('invoice')}>
                       + Create New Invoice
                     </button>
                   </div>
@@ -1535,10 +2128,10 @@ export default function App() {
                             <tr key={inv.id}>
                               <td style={{ fontWeight: 600 }}>{inv.invoiceNumber}</td>
                               <td>{new Date(inv.invoiceDate || inv.createdAt).toLocaleDateString('en-IN')}</td>
-                              <td>{inv.customer?.name || 'Walk-in Customer'}</td>
+                              <td>{inv.customerName || 'Walk-in Customer'}</td>
                               <td style={{ textAlign: 'right', fontWeight: 600 }}>₹{Number(inv.billAmount).toFixed(2)}</td>
                               <td>
-                                <span className="badge badge-success">{inv.paymentStatus}</span>
+                                <span className="badge badge-success">{inv.paymentStatus || 'PAID'}</span>
                               </td>
                               <td style={{ textAlign: 'right' }}>
                                 <div style={{ display: 'inline-flex', gap: '6px' }}>
@@ -1565,10 +2158,10 @@ export default function App() {
                     </div>
                   ) : (
                     <div className="empty-state">
-                      <div className="empty-state-title">No invoices created yet</div>
-                      <div className="empty-state-text">Create your first invoice to start recording daily sales.</div>
-                      <button className="btn btn-primary" onClick={() => setActiveTab('invoice')}>
-                        Create First Invoice
+                      <div className="empty-state-title">No invoices recorded yet</div>
+                      <div className="empty-state-text">Create your first bill to start tracking store sales.</div>
+                      <button className="btn btn-primary" onClick={() => handleNavClick('invoice')}>
+                        Create First Bill
                       </button>
                     </div>
                   )}
@@ -1707,27 +2300,99 @@ export default function App() {
                 </div>
               )}
 
-              <div className="form-group">
-                <label className="form-label">Select Customer</label>
-                <div style={{ display: 'flex', gap: '10px' }}>
-                  <select
-                    className="form-select"
-                    value={selectedCustomerId}
-                    onChange={(e) => {
-                      setSelectedCustomerId(e.target.value);
-                      setTaxTypeManualOverride(false);
-                    }}
-                  >
-                    {customers.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name} {c.mobile ? `(${c.mobile})` : ''} {c.gstin ? `[GSTIN: ${c.gstin}]` : ''}
-                      </option>
-                    ))}
-                  </select>
-                  <button className="btn btn-secondary" onClick={() => setActiveTab('customer')} title="Add customer">
-                    <Plus size={16} /> Add Customer
-                  </button>
+              <div className="form-group" style={{ marginBottom: '16px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
+                  <label className="form-label" style={{ marginBottom: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Users size={16} style={{ color: 'var(--primary)' }} />
+                    <span>Select Customer</span>
+                    <span style={{ fontSize: '0.75rem', fontWeight: 500, color: 'var(--text-muted)' }}>
+                      ({customers.length} registered)
+                    </span>
+                  </label>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-secondary"
+                      onClick={handleQuickWalkInCustomer}
+                      style={{ whiteSpace: 'nowrap', fontSize: '0.8125rem', padding: '5px 12px' }}
+                      title="Quickly assign a Walk-in Cash customer"
+                    >
+                      <Zap size={14} style={{ color: 'var(--primary)' }} /> Walk-in (Cash)
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-primary"
+                      onClick={() => setShowQuickCustomerModal(true)}
+                      style={{ whiteSpace: 'nowrap', fontSize: '0.8125rem', padding: '5px 12px' }}
+                      title="Add a new customer without leaving invoice"
+                    >
+                      <UserPlus size={14} /> Add Customer
+                    </button>
+                  </div>
                 </div>
+
+                {customers.length === 0 ? (
+                  <div style={{
+                    padding: '16px 18px',
+                    background: 'var(--bg-subtle)',
+                    border: '1px dashed var(--border)',
+                    borderRadius: 'var(--radius)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: '12px',
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      <div style={{
+                        width: '38px',
+                        height: '38px',
+                        borderRadius: '50%',
+                        background: 'var(--bg-surface)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        border: '1px solid var(--border)',
+                        color: 'var(--text-secondary)',
+                        flexShrink: 0,
+                      }}>
+                        <Users size={18} />
+                      </div>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: '0.875rem', color: 'var(--text-primary)' }}>
+                          No customers in directory yet
+                        </div>
+                        <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
+                          Click <strong>"+ Add Customer"</strong> above for regular buyers, or <strong>"Walk-in (Cash)"</strong> for quick retail billing.
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ position: 'relative' }}>
+                    <select
+                      className="form-select"
+                      style={{
+                        width: '100%',
+                        fontWeight: selectedCustomerId ? 500 : 400,
+                        color: selectedCustomerId ? 'var(--text-primary)' : 'var(--text-muted)',
+                      }}
+                      value={selectedCustomerId}
+                      onChange={(e) => {
+                        setSelectedCustomerId(e.target.value);
+                        setTaxTypeManualOverride(false);
+                      }}
+                    >
+                      <option value="">-- Choose Customer ({customers.length} available) --</option>
+                      {customers.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name} {c.mobile ? `· ${c.mobile}` : ''} {c.gstin ? `· GST: ${c.gstin}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
 
                 {/* Selected Customer Summary & Tax Place of Supply */}
                 {(() => {
@@ -1779,6 +2444,18 @@ export default function App() {
                           <option value="INTRASTATE">Force Intra-state (CGST + SGST)</option>
                           <option value="INTERSTATE">Force Inter-state (IGST)</option>
                         </select>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-secondary"
+                          style={{ padding: '4px 10px', fontSize: '0.75rem', height: '30px', minHeight: '30px', color: 'var(--text-secondary)' }}
+                          onClick={() => {
+                            setSelectedCustomerId('');
+                            setTaxTypeManualOverride(false);
+                          }}
+                          title="Clear customer selection"
+                        >
+                          Clear
+                        </button>
                       </div>
                     </div>
                   );
@@ -1787,10 +2464,17 @@ export default function App() {
 
               {/* Step 2: Add Product Line Item */}
               <div style={{ backgroundColor: 'var(--bg-canvas)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '16px', marginBottom: '20px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                  <div style={{ fontWeight: 600, fontSize: '0.9375rem' }}>Add Item to Invoice</div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                    <div style={{ fontWeight: 600, fontSize: '0.9375rem' }}>Add Item to Invoice</div>
+                    {invoiceItems.length > 0 && (
+                      <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--primary)', background: 'var(--primary-light)', padding: '2px 8px', borderRadius: '9999px', border: '1px solid rgba(37, 99, 235, 0.2)' }}>
+                        Live Bill: ₹{liveTotals.billAmount} ({invoiceItems.length} {invoiceItems.length === 1 ? 'item' : 'items'})
+                      </span>
+                    )}
+                  </div>
                   {products.length > 0 && (
-                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
                       <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Quick select:</span>
                       {products.map((p) => (
                         <button
@@ -1810,7 +2494,7 @@ export default function App() {
                     </div>
                   )}
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr auto', gap: '12px', alignItems: 'flex-end' }}>
+                <div className="item-input-grid">
                   <div>
                     <label className="form-label" style={{ fontSize: '0.8125rem' }}>Choose Product</label>
                     <select
@@ -1839,7 +2523,7 @@ export default function App() {
                           className="form-input"
                           value={itemQty}
                           onChange={(e) => setItemQty(e.target.value)}
-                          placeholder="1"
+                          placeholder="Qty (e.g. 1)"
                         />
                       </div>
                       <div>
@@ -1851,7 +2535,7 @@ export default function App() {
                           className="form-input"
                           value={itemRate}
                           onChange={(e) => setItemRate(e.target.value)}
-                          placeholder="e.g. 200"
+                          placeholder="Rate in ₹ (auto-filled)"
                           title="Selling price can be freely negotiated and edited per line"
                         />
                       </div>
@@ -1915,7 +2599,7 @@ export default function App() {
                   {/* Step 4: Bill Summary Box */}
                   {invoiceItems.length > 0 && (
                     <div style={{ background: 'var(--bg-canvas)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '20px', marginBottom: '24px' }}>
-                      <div style={{ maxWidth: '340px', marginLeft: 'auto' }}>
+                      <div className="bill-summary-box">
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '0.9375rem' }}>
                           <span style={{ color: 'var(--text-secondary)' }}>Price before tax:</span>
                           <span style={{ fontWeight: 600 }}>₹{liveTotals.taxableTotal}</span>
@@ -1986,7 +2670,7 @@ export default function App() {
                       <input
                         type="text"
                         className="form-input"
-                        placeholder="Search invoice number (e.g. 1001 or INV-1001), customer, or phone..."
+                        placeholder="Search by invoice # (e.g. INV-1001), customer name, or phone..."
                         value={invoiceSearchQuery}
                         onChange={(e) => {
                           setInvoiceSearchQuery(e.target.value);
@@ -2125,7 +2809,7 @@ export default function App() {
                       <input
                         type="text"
                         className="form-input"
-                        placeholder="Type invoice number (e.g. 1001, INV-1001), customer name, or phone..."
+                        placeholder="Search by invoice # (e.g. INV-1001), customer name, or phone..."
                         value={invoiceSearchQuery}
                         onChange={(e) => {
                           setInvoiceSearchQuery(e.target.value);
@@ -2190,7 +2874,7 @@ export default function App() {
                                     <div style={{ fontWeight: 600 }}>{inv.customer?.name || 'Walk-in Customer'}</div>
                                     {inv.customer?.mobile && (
                                       <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                                        📞 {inv.customer.mobile}
+                                        {inv.customer.mobile}
                                       </div>
                                     )}
                                     {inv.customer?.gstin && (
@@ -2354,38 +3038,141 @@ export default function App() {
               <h2 style={{ fontSize: '1.125rem', fontWeight: 600, marginBottom: '16px' }}>Record New Inward Stock</h2>
 
               {/* Supplier & Bill Details */}
-              <div className="form-grid-2">
-                <div className="form-group">
-                  <label className="form-label">Supplier</label>
-                  <select
-                    className="form-select"
-                    value={selectedSupplierId}
-                    onChange={(e) => setSelectedSupplierId(e.target.value)}
-                  >
-                    {suppliers.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name} {s.mobile ? `(${s.mobile})` : ''}
-                      </option>
-                    ))}
-                  </select>
+              <div className="form-grid-2" style={{ alignItems: 'start', marginBottom: '16px' }}>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px', flexWrap: 'wrap', gap: '6px' }}>
+                    <label className="form-label" style={{ marginBottom: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Building2 size={16} style={{ color: 'var(--primary)' }} />
+                      <span>Supplier / Vendor</span>
+                      <span style={{ fontSize: '0.75rem', fontWeight: 500, color: 'var(--text-muted)' }}>
+                        ({suppliers.length} registered)
+                      </span>
+                    </label>
+
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-primary"
+                      onClick={() => setShowQuickSupplierModal(true)}
+                      style={{ whiteSpace: 'nowrap', fontSize: '0.8125rem', padding: '4px 10px', minHeight: '30px', height: '30px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                      title="Add a new supplier without leaving this screen"
+                    >
+                      <Plus size={14} /> Add Supplier
+                    </button>
+                  </div>
+
+                  {suppliers.length === 0 ? (
+                    <div style={{
+                      padding: '12px 14px',
+                      background: 'var(--bg-subtle)',
+                      border: '1px dashed var(--border)',
+                      borderRadius: 'var(--radius)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      flexWrap: 'wrap',
+                      gap: '10px',
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <div style={{
+                          width: '32px',
+                          height: '32px',
+                          borderRadius: '50%',
+                          background: 'var(--bg-surface)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          border: '1px solid var(--border)',
+                          color: 'var(--text-secondary)',
+                          flexShrink: 0,
+                        }}>
+                          <Truck size={16} />
+                        </div>
+                        <div>
+                          <div style={{ fontWeight: 600, fontSize: '0.8125rem', color: 'var(--text-primary)' }}>
+                            No suppliers registered yet
+                          </div>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                            Click <strong>"+ Add Supplier"</strong> above to register your vendor.
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <select
+                        className="form-select"
+                        style={{
+                          width: '100%',
+                          fontWeight: selectedSupplierId ? 500 : 400,
+                          color: selectedSupplierId ? 'var(--text-primary)' : 'var(--text-muted)',
+                        }}
+                        value={selectedSupplierId}
+                        onChange={(e) => setSelectedSupplierId(e.target.value)}
+                      >
+                        <option value="">-- Choose Supplier ({suppliers.length} available) --</option>
+                        {suppliers.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.name} {s.mobile ? `· ${s.mobile}` : ''} {s.gstin ? `· GST: ${s.gstin}` : ''}
+                          </option>
+                        ))}
+                      </select>
+
+                      {(() => {
+                        const curr = suppliers.find((s) => s.id === selectedSupplierId);
+                        if (!curr) return null;
+                        return (
+                          <div style={{
+                            marginTop: '8px',
+                            padding: '8px 12px',
+                            background: 'var(--bg-canvas)',
+                            borderRadius: 'var(--radius)',
+                            border: '1px solid var(--border)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            fontSize: '0.8125rem',
+                          }}>
+                            <div>
+                              <span style={{ fontWeight: 600 }}>{curr.name}</span>
+                              {curr.mobile && <span style={{ color: 'var(--text-secondary)', marginLeft: '8px' }}>· {curr.mobile}</span>}
+                              {curr.gstin && <span style={{ color: 'var(--text-secondary)', marginLeft: '8px' }}>· GST: {curr.gstin}</span>}
+                            </div>
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-secondary"
+                              style={{ padding: '2px 8px', fontSize: '0.75rem', minHeight: '26px', height: '26px', color: 'var(--text-secondary)' }}
+                              onClick={() => setSelectedSupplierId('')}
+                              title="Clear supplier selection"
+                            >
+                              Clear
+                            </button>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
                 </div>
 
-                <div className="form-group">
-                  <label className="form-label">Supplier Bill / Invoice Number</label>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">
+                    Supplier Bill / Invoice Number <span style={{ color: 'var(--status-danger)' }}>*</span>
+                  </label>
                   <input
                     type="text"
                     className="form-input"
-                    placeholder="e.g. SUPP-INV-9921"
+                    placeholder="Vendor bill / invoice # (e.g. INV-2026-089)"
                     value={purchaseRefNumber}
                     onChange={(e) => setPurchaseRefNumber(e.target.value)}
+                    required
                   />
+                  <span className="form-hint">Invoice or challan number received from the vendor</span>
                 </div>
               </div>
 
               {/* Add Purchase Line Item */}
               <div style={{ backgroundColor: 'var(--bg-canvas)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '16px', marginBottom: '20px' }}>
                 <div style={{ fontWeight: 600, marginBottom: '12px', fontSize: '0.9375rem' }}>Add Product to Purchase Order</div>
-                <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr auto', gap: '12px', alignItems: 'flex-end' }}>
+                <div className="item-input-grid">
                   <div>
                     <label className="form-label" style={{ fontSize: '0.8125rem' }}>Product</label>
                     <select
@@ -2413,7 +3200,7 @@ export default function App() {
                       className="form-input"
                       value={purchaseQty}
                       onChange={(e) => setPurchaseQty(e.target.value)}
-                      placeholder="Qty"
+                      placeholder="Qty (e.g. 10)"
                     />
                   </div>
                   <div>
@@ -2424,7 +3211,7 @@ export default function App() {
                       className="form-input"
                       value={purchaseRate}
                       onChange={(e) => setPurchaseRate(e.target.value)}
-                      placeholder="Rate"
+                      placeholder="Cost in ₹ (e.g. 150)"
                     />
                   </div>
                   <button type="button" className="btn btn-secondary" onClick={handleAddPurchaseItem}>
@@ -2548,7 +3335,7 @@ export default function App() {
                   <input
                     type="text"
                     className="form-input"
-                    placeholder="e.g. Havells 2.5 sq mm Copper Wire 90m"
+                    placeholder="e.g. Absolute Magic Locker – Multi Device"
                     value={productForm.name}
                     onChange={(e) => setProductForm({ ...productForm, name: e.target.value })}
                     required
@@ -2561,7 +3348,7 @@ export default function App() {
                     <input
                       type="text"
                       className="form-input"
-                      placeholder="e.g. 998314"
+                      placeholder="6-digit HSN/SAC (e.g. 998314)"
                       value={productForm.hsnCode}
                       onChange={(e) => setProductForm({ ...productForm, hsnCode: e.target.value })}
                       required
@@ -2591,7 +3378,7 @@ export default function App() {
                       type="number"
                       step="0.01"
                       className="form-input"
-                      placeholder="0.00"
+                      placeholder="Cost in ₹ (e.g. 150.00)"
                       value={productForm.purchasePrice}
                       onChange={(e) => setProductForm({ ...productForm, purchasePrice: e.target.value })}
                       required
@@ -2604,7 +3391,7 @@ export default function App() {
                       type="number"
                       step="0.01"
                       className="form-input"
-                      placeholder="0.00"
+                      placeholder="Selling rate / MRP in ₹ (e.g. 200.00)"
                       value={productForm.sellingPrice}
                       onChange={(e) => setProductForm({ ...productForm, sellingPrice: e.target.value })}
                       required
@@ -2620,6 +3407,7 @@ export default function App() {
                       className="form-input"
                       value={productForm.openingStock}
                       onChange={(e) => setProductForm({ ...productForm, openingStock: e.target.value })}
+                      placeholder="Opening stock (e.g. 10)"
                       required
                     />
                   </div>
@@ -2633,6 +3421,7 @@ export default function App() {
                       className="form-input"
                       value={productForm.minStockLevel}
                       onChange={(e) => setProductForm({ ...productForm, minStockLevel: e.target.value })}
+                      placeholder="e.g. 5 (threshold count)"
                     />
                     <span className="form-hint">Warns when stock falls to this number</span>
                   </div>
@@ -2709,7 +3498,7 @@ export default function App() {
                   <input
                     type="text"
                     className="form-input"
-                    placeholder="e.g. Sharma Hardware"
+                    placeholder="e.g. Patel Telecom, Rajesh Mobile, or Cash Buyer"
                     value={customerForm.name}
                     onChange={(e) => setCustomerForm({ ...customerForm, name: e.target.value })}
                     required
@@ -2723,7 +3512,7 @@ export default function App() {
                   <input
                     type="text"
                     className="form-input"
-                    placeholder="e.g. +91 98000 00000"
+                    placeholder="10-digit mobile number (e.g. 9876543210)"
                     value={customerForm.mobile}
                     onChange={(e) => setCustomerForm({ ...customerForm, mobile: e.target.value })}
                   />
@@ -2736,7 +3525,7 @@ export default function App() {
                   <input
                     type="text"
                     className="form-input"
-                    placeholder="Shop address or city"
+                    placeholder="Shop name, street, or city (e.g. Navrangpura, Ahmedabad)"
                     value={customerForm.address}
                     onChange={(e) => setCustomerForm({ ...customerForm, address: e.target.value })}
                   />
@@ -2749,7 +3538,7 @@ export default function App() {
                   <input
                     type="text"
                     className="form-input"
-                    placeholder="e.g. 24AAAAA0000A1Z5"
+                    placeholder="15-character GSTIN (e.g. 24ABCDE1234F1Z5)"
                     value={customerForm.gstin}
                     onChange={(e) => {
                       const val = e.target.value.toUpperCase();
@@ -2847,7 +3636,7 @@ export default function App() {
                   <input
                     type="text"
                     className="form-input"
-                    placeholder="e.g. Gujarat Electrical Distributors"
+                    placeholder="e.g. Apex Digital Systems, National Software Hub"
                     value={supplierForm.name}
                     onChange={(e) => setSupplierForm({ ...supplierForm, name: e.target.value })}
                     required
@@ -2862,7 +3651,7 @@ export default function App() {
                     <input
                       type="text"
                       className="form-input"
-                      placeholder="e.g. +91 98250 12345"
+                      placeholder="Vendor contact number (e.g. 9825012345)"
                       value={supplierForm.mobile}
                       onChange={(e) => setSupplierForm({ ...supplierForm, mobile: e.target.value })}
                     />
@@ -2875,7 +3664,7 @@ export default function App() {
                     <input
                       type="text"
                       className="form-input"
-                      placeholder="24AABCE1234F1Z1"
+                      placeholder="15-character GSTIN (e.g. 24AAPEX1234A1Z1)"
                       value={supplierForm.gstin}
                       onChange={(e) => setSupplierForm({ ...supplierForm, gstin: e.target.value.toUpperCase() })}
                     />
@@ -2889,7 +3678,7 @@ export default function App() {
                   <input
                     type="text"
                     className="form-input"
-                    placeholder="City or warehouse location"
+                    placeholder="Vendor office, warehouse, or city (e.g. GIDC, Gandhinagar)"
                     value={supplierForm.address}
                     onChange={(e) => setSupplierForm({ ...supplierForm, address: e.target.value })}
                   />
@@ -3300,6 +4089,7 @@ export default function App() {
                     className="form-input"
                     value={companySettings.name || ''}
                     onChange={(e) => setCompanySettings({ ...companySettings, name: e.target.value })}
+                    placeholder="e.g. Prathna Enterprises"
                     required
                   />
                 </div>
@@ -3311,6 +4101,7 @@ export default function App() {
                     className="form-input"
                     value={companySettings.address || ''}
                     onChange={(e) => setCompanySettings({ ...companySettings, address: e.target.value })}
+                    placeholder="Shop address, complex, street, city - PIN code"
                   />
                 </div>
 
@@ -3322,6 +4113,7 @@ export default function App() {
                       className="form-input"
                       value={companySettings.phone || ''}
                       onChange={(e) => setCompanySettings({ ...companySettings, phone: e.target.value })}
+                      placeholder="e.g. +91 98765 43210"
                     />
                   </div>
 
@@ -3332,6 +4124,7 @@ export default function App() {
                       className="form-input"
                       value={companySettings.gstin || ''}
                       onChange={(e) => setCompanySettings({ ...companySettings, gstin: e.target.value.toUpperCase() })}
+                      placeholder="15-character GSTIN (e.g. 24AAACP9988P1Z8)"
                     />
                   </div>
                 </div>
@@ -3345,6 +4138,7 @@ export default function App() {
                     className="form-input"
                     value={companySettings.pan || ''}
                     onChange={(e) => setCompanySettings({ ...companySettings, pan: e.target.value.toUpperCase() })}
+                    placeholder="10-character PAN (e.g. AAACP9988P)"
                   />
                 </div>
 
@@ -3355,6 +4149,7 @@ export default function App() {
                     rows="3"
                     value={companySettings.terms || ''}
                     onChange={(e) => setCompanySettings({ ...companySettings, terms: e.target.value })}
+                    placeholder="e.g. 1. Goods once sold will not be returned without original bill. 2. Subject to local jurisdiction."
                   />
                 </div>
 
@@ -3366,7 +4161,7 @@ export default function App() {
                     style={{ lineHeight: '1.6' }}
                     value={companySettings.termsGujarati || ''}
                     onChange={(e) => setCompanySettings({ ...companySettings, termsGujarati: e.target.value })}
-                    placeholder="શરતો અને નિયમો..."
+                    placeholder="દા.ત. ૧. વેચેલો માલ પરત લેવામાં આવશે નહીં. ૨. વિવાદ માટે સુરત અધિકારક્ષેત્ર રહેશે."
                   />
                   <span className="form-hint">
                     Printed in terms box on PDF using bundled Noto Sans Gujarati Unicode font.
@@ -3438,6 +4233,7 @@ export default function App() {
                                 step="1"
                                 className="form-input"
                                 style={{ width: '80px', textAlign: 'right', padding: '6px 8px', minHeight: '36px' }}
+                                placeholder="0"
                                 value={returnQuantities[item.id] || '0'}
                                 onChange={(e) =>
                                   setReturnQuantities({
@@ -3462,7 +4258,7 @@ export default function App() {
                 <input
                   type="text"
                   className="form-input"
-                  placeholder="e.g. Customer changed mind, defective item"
+                  placeholder="Reason for return (e.g. customer requested refund, product exchange)..."
                   value={returnReason}
                   onChange={(e) => setReturnReason(e.target.value)}
                 />
@@ -3521,7 +4317,7 @@ export default function App() {
                   type="password"
                   className="form-input"
                   required
-                  placeholder="Enter current password"
+                  placeholder="Enter your current account password"
                   value={passwordChangeForm.currentPassword}
                   onChange={(e) => setPasswordChangeForm({ ...passwordChangeForm, currentPassword: e.target.value })}
                 />
@@ -3534,7 +4330,7 @@ export default function App() {
                   className="form-input"
                   required
                   minLength={8}
-                  placeholder="Enter new password"
+                  placeholder="Enter new secure password (min 8 characters)"
                   value={passwordChangeForm.newPassword}
                   onChange={(e) => setPasswordChangeForm({ ...passwordChangeForm, newPassword: e.target.value })}
                 />
@@ -3546,7 +4342,7 @@ export default function App() {
                   type="password"
                   className="form-input"
                   required
-                  placeholder="Repeat new password"
+                  placeholder="Re-enter new password to confirm"
                   value={passwordChangeForm.confirmPassword}
                   onChange={(e) => setPasswordChangeForm({ ...passwordChangeForm, confirmPassword: e.target.value })}
                 />
@@ -3566,6 +4362,251 @@ export default function App() {
                   disabled={passwordChangeLoading}
                 >
                   {passwordChangeLoading ? 'Updating...' : 'Set New Password'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {/* ========================================================================= */}
+      {/* MODAL: QUICK ADD CUSTOMER (INLINE ON INVOICE SCREEN) */}
+      {/* ========================================================================= */}
+      {showQuickCustomerModal && (
+        <div className="modal-backdrop" onClick={() => !savingQuickCust && setShowQuickCustomerModal(false)}>
+          <div className="modal-content" style={{ maxWidth: '480px' }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <UserPlus size={20} style={{ color: 'var(--primary)' }} />
+                <div className="modal-title">Add New Customer</div>
+              </div>
+              <button
+                type="button"
+                className="btn-icon"
+                onClick={() => setShowQuickCustomerModal(false)}
+                disabled={savingQuickCust}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveQuickCustomer}>
+              <div className="form-group" style={{ marginBottom: '12px' }}>
+                <label className="form-label">
+                  Customer / Buyer Name <span style={{ color: 'var(--status-danger)' }}>*</span>
+                </label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. Patel Telecom, Rajesh Bhai, or Cash Buyer"
+                  required
+                  autoFocus
+                  value={quickCustForm.name}
+                  onChange={(e) => setQuickCustForm({ ...quickCustForm, name: e.target.value })}
+                />
+              </div>
+
+              <div className="form-group" style={{ marginBottom: '12px' }}>
+                <label className="form-label">
+                  Mobile Number <span className="form-label-optional">(optional)</span>
+                </label>
+                <input
+                  type="tel"
+                  className="form-input"
+                  placeholder="10-digit mobile number (e.g. 9876543210)"
+                  value={quickCustForm.mobile}
+                  onChange={(e) => setQuickCustForm({ ...quickCustForm, mobile: e.target.value })}
+                />
+              </div>
+
+              <div className="form-group" style={{ marginBottom: '12px' }}>
+                <label className="form-label">
+                  GSTIN <span className="form-label-optional">(optional, for B2B tax invoice)</span>
+                </label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="15-character GSTIN (e.g. 24ABCDE1234F1Z5)"
+                  value={quickCustForm.gstin}
+                  onChange={(e) => {
+                    const val = e.target.value.toUpperCase();
+                    const detectedState = getStateCodeFromGSTIN(val);
+                    setQuickCustForm({
+                      ...quickCustForm,
+                      gstin: val,
+                      ...(detectedState ? { state: detectedState } : {}),
+                    });
+                  }}
+                />
+                <span className="form-hint">Auto-detects 2-digit state code prefix if entered.</span>
+              </div>
+
+              <div className="form-group" style={{ marginBottom: '12px' }}>
+                <label className="form-label">
+                  State / Place of Supply <span className="form-label-optional">(GST Code)</span>
+                </label>
+                <select
+                  className="form-select"
+                  value={quickCustForm.state || '24'}
+                  onChange={(e) => setQuickCustForm({ ...quickCustForm, state: e.target.value })}
+                >
+                  {Object.entries(INDIAN_STATES).map(([code, name]) => (
+                    <option key={code} value={code}>
+                      {code} - {name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="form-group" style={{ marginBottom: '20px' }}>
+                <label className="form-label">
+                  Billing Address <span className="form-label-optional">(optional)</span>
+                </label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="Shop name, market area, or city (e.g. Navrangpura, Ahmedabad)"
+                  value={quickCustForm.address}
+                  onChange={(e) => setQuickCustForm({ ...quickCustForm, address: e.target.value })}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', alignItems: 'center' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  disabled={savingQuickCust}
+                  onClick={() => setShowQuickCustomerModal(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={savingQuickCust}
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                >
+                  {savingQuickCust ? 'Saving Customer...' : (
+                    <>
+                      <CheckCircle2 size={16} /> Save & Select
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {/* ========================================================================= */}
+      {/* MODAL: QUICK ADD SUPPLIER (INLINE ON INWARD PURCHASES SCREEN) */}
+      {/* ========================================================================= */}
+      {showQuickSupplierModal && (
+        <div className="modal-backdrop" onClick={() => !savingQuickSupp && setShowQuickSupplierModal(false)}>
+          <div className="modal-content" style={{ maxWidth: '480px' }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Building2 size={20} style={{ color: 'var(--primary)' }} />
+                <div className="modal-title">Add New Supplier</div>
+              </div>
+              <button
+                type="button"
+                className="btn-icon"
+                onClick={() => setShowQuickSupplierModal(false)}
+                disabled={savingQuickSupp}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveQuickSupplier}>
+              <div className="form-group" style={{ marginBottom: '12px' }}>
+                <label className="form-label">
+                  Supplier / Vendor Name <span style={{ color: 'var(--status-danger)' }}>*</span>
+                </label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. Apex Digital Systems, National Software Hub"
+                  required
+                  autoFocus
+                  value={quickSuppForm.name}
+                  onChange={(e) => setQuickSuppForm({ ...quickSuppForm, name: e.target.value })}
+                />
+              </div>
+
+              <div className="form-group" style={{ marginBottom: '12px' }}>
+                <label className="form-label">
+                  Mobile / Phone Number <span className="form-label-optional">(optional)</span>
+                </label>
+                <input
+                  type="tel"
+                  className="form-input"
+                  placeholder="Vendor contact number (e.g. 9822211100)"
+                  value={quickSuppForm.mobile}
+                  onChange={(e) => setQuickSuppForm({ ...quickSuppForm, mobile: e.target.value })}
+                />
+              </div>
+
+              <div className="form-group" style={{ marginBottom: '12px' }}>
+                <label className="form-label">
+                  GSTIN <span className="form-label-optional">(optional)</span>
+                </label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="15-character GSTIN (e.g. 24AAPEX1234A1Z1)"
+                  value={quickSuppForm.gstin}
+                  onChange={(e) => setQuickSuppForm({ ...quickSuppForm, gstin: e.target.value.toUpperCase() })}
+                />
+              </div>
+
+              <div className="form-group" style={{ marginBottom: '12px' }}>
+                <label className="form-label">
+                  PAN <span className="form-label-optional">(optional)</span>
+                </label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="10-character PAN (e.g. AAPEX1234A)"
+                  value={quickSuppForm.pan}
+                  onChange={(e) => setQuickSuppForm({ ...quickSuppForm, pan: e.target.value.toUpperCase() })}
+                />
+              </div>
+
+              <div className="form-group" style={{ marginBottom: '20px' }}>
+                <label className="form-label">
+                  Address <span className="form-label-optional">(optional)</span>
+                </label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="Vendor warehouse, office, or city (e.g. GIDC, Gandhinagar)"
+                  value={quickSuppForm.address}
+                  onChange={(e) => setQuickSuppForm({ ...quickSuppForm, address: e.target.value })}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', alignItems: 'center' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  disabled={savingQuickSupp}
+                  onClick={() => setShowQuickSupplierModal(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={savingQuickSupp}
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                >
+                  {savingQuickSupp ? 'Saving Supplier...' : (
+                    <>
+                      <CheckCircle2 size={16} /> Save & Select
+                    </>
+                  )}
                 </button>
               </div>
             </form>

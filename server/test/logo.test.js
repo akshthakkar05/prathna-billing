@@ -33,7 +33,20 @@ test.after(async () => {
   if (server) {
     await new Promise((resolve) => server.close(resolve));
   }
-  // Reset back to real Prathna logo
+  // Restore real Prathna logo file and database settings
+  try {
+    const fs = await import('fs');
+    const path = await import('path');
+    const logoDir = path.resolve('assets/logo');
+    const prathnaPath = path.join(logoDir, 'prathna-logo.png');
+    const companyPath = path.join(logoDir, 'company-logo.png');
+    if (fs.existsSync(prathnaPath)) {
+      fs.copyFileSync(prathnaPath, companyPath);
+    }
+  } catch (err) {
+    console.warn('Failed to restore company-logo.png in test.after:', err);
+  }
+
   await prisma.companySettings.updateMany({
     data: {
       name: 'Prathna Enterprises',

@@ -125,6 +125,14 @@ router.post('/logo', async (req, res) => {
 
     await fs.promises.writeFile(filePath, buffer);
 
+    // Also mirror to client public directory if available for Vite dev proxy
+    try {
+      const clientPublicLogoDir = path.resolve(__dirname, '../../../client/public/assets/logo');
+      if (fs.existsSync(clientPublicLogoDir)) {
+        await fs.promises.writeFile(path.join(clientPublicLogoDir, filename), buffer);
+      }
+    } catch {}
+
     // Cache-busting timestamp parameter so browser immediately displays the freshly uploaded logo
     const v = Date.now();
     const logoUrl = `/assets/logo/${filename}?v=${v}`;
