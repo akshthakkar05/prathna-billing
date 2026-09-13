@@ -37,12 +37,14 @@ router.get('/sales', async (req, res) => {
     let totalTaxable = new Decimal(0);
     let totalCGST = new Decimal(0);
     let totalSGST = new Decimal(0);
+    let totalIGST = new Decimal(0);
     let totalSales = new Decimal(0);
 
     for (const inv of invoices) {
       totalTaxable = totalTaxable.plus(new Decimal(inv.taxableTotal));
       totalCGST = totalCGST.plus(new Decimal(inv.cgstTotal));
       totalSGST = totalSGST.plus(new Decimal(inv.sgstTotal));
+      totalIGST = totalIGST.plus(new Decimal(inv.igstTotal || 0));
       totalSales = totalSales.plus(new Decimal(inv.billAmount));
     }
 
@@ -50,8 +52,13 @@ router.get('/sales', async (req, res) => {
       summary: {
         invoiceCount: invoices.length,
         totalTaxable: totalTaxable.toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toString(),
+        taxableTotal: totalTaxable.toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toString(),
         totalCGST: totalCGST.toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toString(),
+        cgstTotal: totalCGST.toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toString(),
         totalSGST: totalSGST.toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toString(),
+        sgstTotal: totalSGST.toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toString(),
+        totalIGST: totalIGST.toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toString(),
+        igstTotal: totalIGST.toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toString(),
         totalSales: totalSales.toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toString(),
       },
       invoices: invoices.map((inv) => ({
@@ -61,9 +68,11 @@ router.get('/sales', async (req, res) => {
         customerName: inv.customer?.name || 'Walk-in Customer',
         customerMobile: inv.customer?.mobile,
         itemCount: inv.items.length,
+        taxType: inv.taxType || 'INTRASTATE',
         taxableTotal: inv.taxableTotal.toString(),
         cgstTotal: inv.cgstTotal.toString(),
         sgstTotal: inv.sgstTotal.toString(),
+        igstTotal: (inv.igstTotal || 0).toString(),
         billAmount: inv.billAmount.toString(),
         paymentStatus: inv.paymentStatus,
       })),

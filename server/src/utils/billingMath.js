@@ -4,67 +4,103 @@ const Decimal = Prisma.Decimal;
 
 /**
  * Calculates line item values using Prisma.Decimal end-to-end.
+ * Supports INTRASTATE (CGST + SGST split) and INTERSTATE (100% IGST).
+ *
  * @param {Object} params
  * @param {string|number|Prisma.Decimal} params.qty
  * @param {string|number|Prisma.Decimal} params.rate (excl. GST)
  * @param {string|number|Prisma.Decimal} params.gstRate (e.g. 18.00)
+ * @param {'INTRASTATE'|'INTERSTATE'} [params.taxType='INTRASTATE']
  */
-export function calculateLineItem({ qty, rate, gstRate }) {
+export function calculateLineItem({ qty, rate, sellingPrice, gstRate, taxType = 'INTRASTATE' }) {
   const dQty = new Decimal(qty);
-  const dRate = new Decimal(rate);
+  const dRate = new Decimal(rate !== undefined ? rate : sellingPrice);
   const dGstRate = new Decimal(gstRate);
+  const cleanTaxType = taxType === 'INTERSTATE' ? 'INTERSTATE' : 'INTRASTATE';
 
   // Taxable Value = qty * rate
   const taxableValue = dQty.mul(dRate).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
 
-  // Intra-state GST is split equally into CGST and SGST
-  const halfGstRate = dGstRate.div(new Decimal(2));
-  const cgstAmount = taxableValue.mul(halfGstRate).div(new Decimal(100)).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
-  const sgstAmount = taxableValue.mul(halfGstRate).div(new Decimal(100)).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+  let cgstAmount = new Decimal(0);
+  let sgstAmount = new Decimal(0);
+  let igstAmount = new Decimal(0);
 
-  // Line total
-  const amount = taxableValue.plus(cgstAmount).plus(sgstAmount).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+  if (cleanTaxType === 'INTERSTATE') {
+    // Inter-state: Full GST rate goes to IGST. CGST and SGST are 0.
+    igstAmount = taxableValue.mul(dGstRate).div(new Decimal(100)).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+  } else {
+    // Intra-state: 50/50 split between CGST and SGST. IGST is 0.
+    const halfGstRate = dGstRate.div(new Decimal(2));
+    cgstAmount = taxableValue.mul(halfGstRate).div(new Decimal(100)).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+    sgstAmount = taxableValue.mul(halfGstRate).div(new Decimal(100)).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+  }
+
+  // Line total = taxableValue + cgstAmount + sgstAmount + igstAmount
+  const amount = taxableValue
+    .plus(cgstAmount)
+    .plus(sgstAmount)
+    .plus(igstAmount)
+    .toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
 
   return {
     qty: dQty,
     rate: dRate,
     gstRateSnapshot: dGstRate,
+    taxType: cleanTaxType,
     taxableValue,
     cgstAmount,
     sgstAmount,
+    igstAmount,
     amount,
   };
 }
 
 /**
  * Calculates complete invoice totals using Prisma.Decimal end-to-end.
+ * Preserves the identity: taxableTotal + cgstTotal + sgstTotal + igstTotal + roundOff == billAmount.
+ *
  * @param {Array} lineItems Array of results from calculateLineItem
+ * @param {'INTRASTATE'|'INTERSTATE'} [taxType='INTRASTATE']
  */
-export function calculateInvoiceTotals(lineItems) {
+export function calculateInvoiceTotals(lineItemsOrObj, taxTypeParam = 'INTRASTATE') {
+  let items = lineItemsOrObj;
+  let tType = taxTypeParam;
+
+  if (lineItemsOrObj && !Array.isArray(lineItemsOrObj) && typeof lineItemsOrObj === 'object') {
+    items = lineItemsOrObj.lineCalculations || lineItemsOrObj.lineItems || [];
+    tType = lineItemsOrObj.taxType || taxTypeParam;
+  }
+
+  const cleanTaxType = tType === 'INTERSTATE' ? 'INTERSTATE' : 'INTRASTATE';
   let taxableTotal = new Decimal(0);
   let cgstTotal = new Decimal(0);
   let sgstTotal = new Decimal(0);
+  let igstTotal = new Decimal(0);
 
-  for (const item of lineItems) {
+  for (const item of (items || [])) {
     taxableTotal = taxableTotal.plus(item.taxableValue);
-    cgstTotal = cgstTotal.plus(item.cgstAmount);
-    sgstTotal = sgstTotal.plus(item.sgstAmount);
+    cgstTotal = cgstTotal.plus(item.cgstAmount || 0);
+    sgstTotal = sgstTotal.plus(item.sgstAmount || 0);
+    igstTotal = igstTotal.plus(item.igstAmount || 0);
   }
 
   taxableTotal = taxableTotal.toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
   cgstTotal = cgstTotal.toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
   sgstTotal = sgstTotal.toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+  igstTotal = igstTotal.toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
 
-  const rawBillTotal = taxableTotal.plus(cgstTotal).plus(sgstTotal);
+  const rawBillTotal = taxableTotal.plus(cgstTotal).plus(sgstTotal).plus(igstTotal);
   // Round off to nearest whole integer
   const roundedBillTotal = rawBillTotal.toDecimalPlaces(0, Decimal.ROUND_HALF_UP);
   const roundOff = roundedBillTotal.minus(rawBillTotal).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
   const billAmount = roundedBillTotal.toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
 
   return {
+    taxType: cleanTaxType,
     taxableTotal,
     cgstTotal,
     sgstTotal,
+    igstTotal,
     roundOff,
     billAmount,
   };

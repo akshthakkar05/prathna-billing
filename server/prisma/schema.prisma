@@ -41,6 +41,7 @@ model Customer {
   mobile    String?
   address   String?
   gstin     String?
+  state     String?  // 2-digit GST state code (e.g. "24")
   createdAt DateTime @default(now())
 
   invoices Invoice[]
@@ -54,9 +55,11 @@ model Invoice {
   customerId String
   customer   Customer @relation(fields: [customerId], references: [id])
 
+  taxType      String  @default("INTRASTATE") // INTRASTATE | INTERSTATE
   taxableTotal Decimal @db.Decimal(10, 2)
   cgstTotal    Decimal @db.Decimal(10, 2)
   sgstTotal    Decimal @db.Decimal(10, 2)
+  igstTotal    Decimal @default(0) @db.Decimal(10, 2)
   roundOff     Decimal @default(0) @db.Decimal(10, 2)
   billAmount   Decimal @db.Decimal(10, 2)
 
@@ -87,6 +90,7 @@ model InvoiceItem {
   taxableValue Decimal @db.Decimal(10, 2)
   cgstAmount   Decimal @db.Decimal(10, 2)
   sgstAmount   Decimal @db.Decimal(10, 2)
+  igstAmount   Decimal @default(0) @db.Decimal(10, 2)
   amount       Decimal @db.Decimal(10, 2) // final line total
 
   returnItems SalesReturnItem[]

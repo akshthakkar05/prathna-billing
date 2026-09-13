@@ -23,6 +23,75 @@ import {
   Lock,
 } from 'lucide-react';
 
+// Reference map of all 37 Indian GST State/UT codes
+const INDIAN_STATES = {
+  '01': 'Jammu and Kashmir',
+  '02': 'Himachal Pradesh',
+  '03': 'Punjab',
+  '04': 'Chandigarh',
+  '05': 'Uttarakhand',
+  '06': 'Haryana',
+  '07': 'Delhi',
+  '08': 'Rajasthan',
+  '09': 'Uttar Pradesh',
+  '10': 'Bihar',
+  '11': 'Sikkim',
+  '12': 'Arunachal Pradesh',
+  '13': 'Nagaland',
+  '14': 'Manipur',
+  '15': 'Mizoram',
+  '16': 'Tripura',
+  '17': 'Meghalaya',
+  '18': 'Assam',
+  '19': 'West Bengal',
+  '20': 'Jharkhand',
+  '21': 'Odisha',
+  '22': 'Chhattisgarh',
+  '23': 'Madhya Pradesh',
+  '24': 'Gujarat',
+  '25': 'Daman and Diu',
+  '26': 'Dadra and Nagar Haveli and Daman and Diu',
+  '27': 'Maharashtra',
+  '28': 'Andhra Pradesh (Old)',
+  '29': 'Karnataka',
+  '30': 'Goa',
+  '31': 'Lakshadweep',
+  '32': 'Kerala',
+  '33': 'Tamil Nadu',
+  '34': 'Puducherry',
+  '35': 'Andaman and Nicobar Islands',
+  '36': 'Telangana',
+  '37': 'Andhra Pradesh',
+  '38': 'Ladakh',
+  '97': 'Other Territory',
+};
+
+function getStateCodeFromGSTIN(gstin) {
+  if (!gstin || typeof gstin !== 'string') return null;
+  const clean = gstin.trim().toUpperCase();
+  if (clean.length < 2) return null;
+  const prefix = clean.slice(0, 2);
+  return INDIAN_STATES[prefix] ? prefix : null;
+}
+
+function getStateNameByCode(code) {
+  if (!code) return 'Unknown State';
+  return INDIAN_STATES[code] || `State (${code})`;
+}
+
+function resolveCustomerStateCode(customer) {
+  if (!customer) return null;
+  // Strict precedence: GSTIN always wins when valid
+  if (customer.gstin) {
+    const fromGstin = getStateCodeFromGSTIN(customer.gstin);
+    if (fromGstin) return fromGstin;
+  }
+  if (customer.state && INDIAN_STATES[customer.state.trim()]) {
+    return customer.state.trim();
+  }
+  return null;
+}
+
 export default function App() {
   // Authentication State
   const [token, setToken] = useState(() => localStorage.getItem('prathna_token') || '');
@@ -88,6 +157,7 @@ export default function App() {
     mobile: '',
     address: '',
     gstin: '',
+    state: '24', // Default to Gujarat (code: 24)
   });
   const [creatingCustomer, setCreatingCustomer] = useState(false);
 
@@ -114,9 +184,14 @@ export default function App() {
 
   // Form: Create Invoice
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
+  const [recentCustomers, setRecentCustomers] = useState([]);
+  const [customerSearchQuery, setCustomerSearchQuery] = useState('');
+  const [invoiceTaxType, setInvoiceTaxType] = useState('INTRASTATE');
+  const [taxTypeManualOverride, setTaxTypeManualOverride] = useState(false);
   const [invoiceItems, setInvoiceItems] = useState([]);
   const [selectedProductId, setSelectedProductId] = useState('');
   const [itemQty, setItemQty] = useState('1');
+  const [itemRate, setItemRate] = useState('');
   const [creatingInvoice, setCreatingInvoice] = useState(false);
   const [savedInvoiceJSON, setSavedInvoiceJSON] = useState(null);
 
@@ -311,26 +386,29 @@ export default function App() {
     setLoadingInitial(true);
     setDataLoadError('');
     try {
-      const [pRes, cRes, sRes, puRes, setRes, dashRes] = await Promise.all([
+      const [pRes, cRes, sRes, puRes, setRes, dashRes, recRes] = await Promise.all([
         authFetch('/products'),
         authFetch('/customers'),
         authFetch('/suppliers'),
         authFetch('/purchases'),
         authFetch('/settings'),
         authFetch('/dashboard/summary'),
+        authFetch('/customers/recent').catch(() => null),
       ]);
 
-      const [pData, cData, sData, puData, setData, dashData] = await Promise.all([
+      const [pData, cData, sData, puData, setData, dashData, recData] = await Promise.all([
         pRes.json(),
         cRes.json(),
         sRes.json(),
         puRes.json(),
         setRes.json(),
         dashRes.json(),
+        recRes ? recRes.json().catch(() => []) : [],
       ]);
 
       setProducts(Array.isArray(pData) ? pData : []);
       setCustomers(Array.isArray(cData) ? cData : []);
+      setRecentCustomers(Array.isArray(recData) ? recData : []);
       setSuppliers(Array.isArray(sData) ? sData : []);
       setPurchases(Array.isArray(puData) ? puData : []);
       if (setData && !setData.error) setCompanySettings(setData);
@@ -369,6 +447,22 @@ export default function App() {
       setShowPasswordChangeModal(true);
     }
   }, [currentUser]);
+
+  // Auto-detect tax type based on selected customer state vs company state
+  useEffect(() => {
+    if (!selectedCustomerId) return;
+    const customer = customers.find((c) => c.id === selectedCustomerId);
+    if (!customer) return;
+
+    // Strict precedence: GSTIN state code first, then customer.state, then default '24' (Gujarat)
+    const custState = resolveCustomerStateCode(customer) || (customer.state ? customer.state.trim() : '24');
+    const compGstin = companySettings?.gstin || '';
+    const compState = getStateCodeFromGSTIN(compGstin) || '24';
+
+    if (!taxTypeManualOverride) {
+      setInvoiceTaxType(custState === compState ? 'INTRASTATE' : 'INTERSTATE');
+    }
+  }, [selectedCustomerId, customers, companySettings, taxTypeManualOverride]);
 
   // Fetch reports based on sub-tab and filters
   const loadReport = async () => {
@@ -662,10 +756,14 @@ export default function App() {
       showToast(`Notice: Stock is only ${prod.currentStock} units`, 'error');
     }
 
+    const rateNum = parseFloat(itemRate);
+    const finalRate = !isNaN(rateNum) && rateNum >= 0 ? rateNum : Number(prod.sellingPrice);
+
     const existingIndex = invoiceItems.findIndex((i) => i.productId === prod.id);
     if (existingIndex > -1) {
       const updated = [...invoiceItems];
       updated[existingIndex].qty += qtyNum;
+      updated[existingIndex].sellingPrice = finalRate;
       setInvoiceItems(updated);
     } else {
       setInvoiceItems([
@@ -675,7 +773,7 @@ export default function App() {
           name: prod.name,
           hsnCode: prod.hsnCode,
           gstRate: prod.gstRate,
-          sellingPrice: prod.sellingPrice,
+          sellingPrice: finalRate,
           currentStock: prod.currentStock,
           unit: prod.unit,
           qty: qtyNum,
@@ -685,6 +783,7 @@ export default function App() {
 
     setSelectedProductId('');
     setItemQty('1');
+    setItemRate('');
   };
 
   const handleRemoveInvoiceItem = (index) => {
@@ -695,22 +794,33 @@ export default function App() {
     let taxable = 0;
     let cgst = 0;
     let sgst = 0;
+    let igst = 0;
+
+    const isInterstate = invoiceTaxType === 'INTERSTATE';
 
     for (const item of invoiceItems) {
       const lineTaxable = Number((item.qty * Number(item.sellingPrice)).toFixed(2));
-      const halfRate = Number(item.gstRate) / 2;
-      const lineCgst = Number(((lineTaxable * halfRate) / 100).toFixed(2));
-      const lineSgst = Number(((lineTaxable * halfRate) / 100).toFixed(2));
+      const rate = Number(item.gstRate);
 
+      if (isInterstate) {
+        const lineIgst = Number(((lineTaxable * rate) / 100).toFixed(2));
+        igst += lineIgst;
+      } else {
+        const halfRate = rate / 2;
+        const lineCgst = Number(((lineTaxable * halfRate) / 100).toFixed(2));
+        const lineSgst = Number(((lineTaxable * halfRate) / 100).toFixed(2));
+        cgst += lineCgst;
+        sgst += lineSgst;
+      }
       taxable += lineTaxable;
-      cgst += lineCgst;
-      sgst += lineSgst;
     }
 
     taxable = Number(taxable.toFixed(2));
     cgst = Number(cgst.toFixed(2));
     sgst = Number(sgst.toFixed(2));
-    const rawBill = taxable + cgst + sgst;
+    igst = Number(igst.toFixed(2));
+
+    const rawBill = isInterstate ? taxable + igst : taxable + cgst + sgst;
     const rounded = Math.round(rawBill);
     const roundOff = Number((rounded - rawBill).toFixed(2));
 
@@ -718,8 +828,10 @@ export default function App() {
       taxableTotal: taxable.toFixed(2),
       cgstTotal: cgst.toFixed(2),
       sgstTotal: sgst.toFixed(2),
+      igstTotal: igst.toFixed(2),
       roundOff: roundOff.toFixed(2),
       billAmount: rounded.toFixed(2),
+      taxType: invoiceTaxType,
     };
   };
 
@@ -740,9 +852,11 @@ export default function App() {
     try {
       const payload = {
         customerId: selectedCustomerId,
+        taxType: invoiceTaxType,
         items: invoiceItems.map((item) => ({
           productId: item.productId,
           qty: item.qty,
+          rate: item.sellingPrice,
         })),
       };
 
@@ -1302,13 +1416,49 @@ export default function App() {
 
             <div className="card">
               {/* Step 1: Customer Selection */}
+              {recentCustomers && recentCustomers.length > 0 && (
+                <div style={{ marginBottom: '14px' }}>
+                  <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '8px' }}>
+                    Quick Select (Recent Customers):
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    {recentCustomers.slice(0, 15).map((rc) => {
+                      const isSelected = selectedCustomerId === rc.id;
+                      const rcState = resolveCustomerStateCode(rc) || '24';
+                      return (
+                        <button
+                          key={rc.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedCustomerId(rc.id);
+                            setTaxTypeManualOverride(false);
+                          }}
+                          className={`btn btn-sm ${isSelected ? 'btn-primary' : 'btn-secondary'}`}
+                          style={{ borderRadius: '20px', padding: '4px 12px', fontSize: '0.8125rem' }}
+                        >
+                          {rc.name}
+                          {rcState !== '24' && (
+                            <span style={{ marginLeft: '6px', fontSize: '0.75rem', opacity: 0.85, background: isSelected ? 'rgba(255,255,255,0.25)' : 'var(--bg-canvas)', padding: '1px 5px', borderRadius: '10px' }}>
+                              {rcState}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               <div className="form-group">
                 <label className="form-label">Select Customer</label>
                 <div style={{ display: 'flex', gap: '10px' }}>
                   <select
                     className="form-select"
                     value={selectedCustomerId}
-                    onChange={(e) => setSelectedCustomerId(e.target.value)}
+                    onChange={(e) => {
+                      setSelectedCustomerId(e.target.value);
+                      setTaxTypeManualOverride(false);
+                    }}
                   >
                     {customers.map((c) => (
                       <option key={c.id} value={c.id}>
@@ -1320,23 +1470,105 @@ export default function App() {
                     <Plus size={16} /> Add Customer
                   </button>
                 </div>
+
+                {/* Selected Customer Summary & Tax Place of Supply */}
+                {(() => {
+                  const currentCust = customers.find((c) => c.id === selectedCustomerId);
+                  if (!currentCust) return null;
+                  const custState = resolveCustomerStateCode(currentCust) || (currentCust.state ? currentCust.state.trim() : '24');
+                  const isInterstate = invoiceTaxType === 'INTERSTATE';
+
+                  return (
+                    <div style={{ marginTop: '12px', padding: '12px 14px', background: 'var(--bg-canvas)', borderRadius: 'var(--radius)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
+                      <div>
+                        <div style={{ fontSize: '0.875rem', fontWeight: 600 }}>
+                          {currentCust.name} {currentCust.gstin ? <span style={{ color: 'var(--text-secondary)', fontWeight: 400 }}>· GSTIN: {currentCust.gstin}</span> : <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>· Unregistered Customer</span>}
+                        </div>
+                        <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                          Place of Supply: <strong style={{ color: 'var(--text-primary)' }}>{getStateNameByCode(custState)} ({custState})</strong>
+                          {currentCust.gstin && <span style={{ marginLeft: '8px', fontSize: '0.75rem', color: 'var(--text-muted)' }}>(Derived from GSTIN prefix)</span>}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div style={{
+                          padding: '4px 10px',
+                          borderRadius: '6px',
+                          fontSize: '0.8125rem',
+                          fontWeight: 600,
+                          background: isInterstate ? '#F3E8FF' : '#E0F2FE',
+                          color: isInterstate ? '#6B21A8' : '#0369A1',
+                          border: `1px solid ${isInterstate ? '#D8B4FE' : '#BAE6FD'}`,
+                        }}>
+                          {isInterstate ? 'Inter-state (IGST 18%)' : 'Intra-state (CGST 9% + SGST 9%)'}
+                        </div>
+                        <select
+                          className="form-select"
+                          style={{ width: 'auto', padding: '4px 8px', fontSize: '0.75rem', height: '30px', minHeight: '30px' }}
+                          value={taxTypeManualOverride ? invoiceTaxType : 'AUTO'}
+                          onChange={(e) => {
+                            if (e.target.value === 'AUTO') {
+                              setTaxTypeManualOverride(false);
+                              const compState = getStateCodeFromGSTIN(companySettings?.gstin || '') || '24';
+                              setInvoiceTaxType(custState === compState ? 'INTRASTATE' : 'INTERSTATE');
+                            } else {
+                              setTaxTypeManualOverride(true);
+                              setInvoiceTaxType(e.target.value);
+                            }
+                          }}
+                          title="Tax Type Override"
+                        >
+                          <option value="AUTO">Auto ({isInterstate ? 'IGST' : 'CGST+SGST'})</option>
+                          <option value="INTRASTATE">Force Intra-state (CGST + SGST)</option>
+                          <option value="INTERSTATE">Force Inter-state (IGST)</option>
+                        </select>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* Step 2: Add Product Line Item */}
               <div style={{ backgroundColor: 'var(--bg-canvas)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '16px', marginBottom: '20px' }}>
-                <div style={{ fontWeight: 600, marginBottom: '12px', fontSize: '0.9375rem' }}>Add Item to Invoice</div>
-                <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr auto', gap: '12px', alignItems: 'flex-end' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                  <div style={{ fontWeight: 600, fontSize: '0.9375rem' }}>Add Item to Invoice</div>
+                  {products.length > 0 && (
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Quick select:</span>
+                      {products.map((p) => (
+                        <button
+                          key={p.id}
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          style={{ fontSize: '0.75rem', padding: '2px 8px', height: '26px' }}
+                          onClick={() => {
+                            setSelectedProductId(p.id);
+                            setItemQty('1');
+                            setItemRate(p.sellingPrice !== undefined && p.sellingPrice !== null ? String(p.sellingPrice) : '');
+                          }}
+                        >
+                          {p.name.replace('Absolute Magic Locker – ', '')} (₹{p.sellingPrice})
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr auto', gap: '12px', alignItems: 'flex-end' }}>
                   <div>
                     <label className="form-label" style={{ fontSize: '0.8125rem' }}>Choose Product</label>
                     <select
                       className="form-select"
                       value={selectedProductId}
-                      onChange={(e) => setSelectedProductId(e.target.value)}
+                      onChange={(e) => {
+                        const pid = e.target.value;
+                        setSelectedProductId(pid);
+                        const p = products.find((prod) => prod.id === pid);
+                        setItemRate(p && p.sellingPrice !== undefined && p.sellingPrice !== null ? String(p.sellingPrice) : '');
+                      }}
                     >
                       <option value="">-- Select a product from stock --</option>
                       {products.map((p) => (
                         <option key={p.id} value={p.id}>
-                          {p.name} | ₹{p.sellingPrice} | Stock: {Number(p.currentStock)} {p.unit}
+                          {p.name} | Default: ₹{p.sellingPrice} | Stock: {Number(p.currentStock)} {p.unit}
                         </option>
                       ))}
                     </select>
@@ -1350,6 +1582,19 @@ export default function App() {
                       value={itemQty}
                       onChange={(e) => setItemQty(e.target.value)}
                       placeholder="1"
+                    />
+                  </div>
+                  <div>
+                    <label className="form-label" style={{ fontSize: '0.8125rem' }}>Unit Rate (₹)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      className="form-input"
+                      value={itemRate}
+                      onChange={(e) => setItemRate(e.target.value)}
+                      placeholder="e.g. 200"
+                      title="Selling price can be freely negotiated and edited per line"
                     />
                   </div>
                   <button type="button" className="btn btn-secondary" onClick={handleAddItemToInvoice}>
@@ -1367,7 +1612,7 @@ export default function App() {
                       <thead>
                         <tr>
                           <th>Item Description</th>
-                          <th>HSN</th>
+                          <th>HSN/SAC Code</th>
                           <th style={{ textAlign: 'right' }}>Qty</th>
                           <th style={{ textAlign: 'right' }}>Unit Rate</th>
                           <th style={{ textAlign: 'right' }}>GST Rate</th>
@@ -1417,14 +1662,23 @@ export default function App() {
                       <span style={{ color: 'var(--text-secondary)' }}>Price before tax:</span>
                       <span style={{ fontWeight: 600 }}>₹{liveTotals.taxableTotal}</span>
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '0.9375rem' }}>
-                      <span style={{ color: 'var(--text-secondary)' }}>Central GST (CGST):</span>
-                      <span>₹{liveTotals.cgstTotal}</span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '0.9375rem' }}>
-                      <span style={{ color: 'var(--text-secondary)' }}>State GST (SGST):</span>
-                      <span>₹{liveTotals.sgstTotal}</span>
-                    </div>
+                    {invoiceTaxType === 'INTERSTATE' ? (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '0.9375rem' }}>
+                        <span style={{ color: 'var(--text-secondary)' }}>Integrated GST (IGST 18%):</span>
+                        <span style={{ fontWeight: 600, color: '#6B21A8' }}>₹{liveTotals.igstTotal}</span>
+                      </div>
+                    ) : (
+                      <>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '0.9375rem' }}>
+                          <span style={{ color: 'var(--text-secondary)' }}>Central GST (CGST 9%):</span>
+                          <span>₹{liveTotals.cgstTotal}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '0.9375rem' }}>
+                          <span style={{ color: 'var(--text-secondary)' }}>State GST (SGST 9%):</span>
+                          <span>₹{liveTotals.sgstTotal}</span>
+                        </div>
+                      </>
+                    )}
                     {Number(liveTotals.roundOff) !== 0 && (
                       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
                         <span>Round-off:</span>
@@ -1502,7 +1756,7 @@ export default function App() {
                       <thead>
                         <tr>
                           <th>Item</th>
-                          <th>HSN</th>
+                          <th>HSN/SAC Code</th>
                           <th style={{ textAlign: 'right' }}>Qty</th>
                           <th style={{ textAlign: 'right' }}>Rate</th>
                           <th style={{ textAlign: 'right' }}>Total</th>
@@ -1629,7 +1883,7 @@ export default function App() {
                       <thead>
                         <tr>
                           <th>Item</th>
-                          <th>HSN</th>
+                          <th>HSN/SAC Code</th>
                           <th style={{ textAlign: 'right' }}>Qty</th>
                           <th style={{ textAlign: 'right' }}>Purchase Rate</th>
                           <th style={{ textAlign: 'right' }}>GST Rate</th>
@@ -1744,11 +1998,11 @@ export default function App() {
 
                 <div className="form-grid-2">
                   <div className="form-group">
-                    <label className="form-label">HSN Code</label>
+                    <label className="form-label">HSN/SAC Code</label>
                     <input
                       type="text"
                       className="form-input"
-                      placeholder="e.g. 8544"
+                      placeholder="e.g. 998314"
                       value={productForm.hsnCode}
                       onChange={(e) => setProductForm({ ...productForm, hsnCode: e.target.value })}
                       required
@@ -1840,7 +2094,7 @@ export default function App() {
                     <thead>
                       <tr>
                         <th>Product Name</th>
-                        <th>HSN</th>
+                        <th>HSN/SAC Code</th>
                         <th>GST</th>
                         <th style={{ textAlign: 'right' }}>Cost</th>
                         <th style={{ textAlign: 'right' }}>Selling Price</th>
@@ -1938,9 +2192,35 @@ export default function App() {
                     className="form-input"
                     placeholder="e.g. 24AAAAA0000A1Z5"
                     value={customerForm.gstin}
-                    onChange={(e) => setCustomerForm({ ...customerForm, gstin: e.target.value.toUpperCase() })}
+                    onChange={(e) => {
+                      const val = e.target.value.toUpperCase();
+                      const detectedState = getStateCodeFromGSTIN(val);
+                      setCustomerForm({
+                        ...customerForm,
+                        gstin: val,
+                        ...(detectedState ? { state: detectedState } : {}),
+                      });
+                    }}
                   />
-                  <span className="form-hint">Leave blank for regular retail consumers</span>
+                  <span className="form-hint">Leave blank for regular retail consumers. Auto-detects state code prefix.</span>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">
+                    State / Place of Supply <span className="form-label-optional">(GST State Code)</span>
+                  </label>
+                  <select
+                    className="form-select"
+                    value={customerForm.state || '24'}
+                    onChange={(e) => setCustomerForm({ ...customerForm, state: e.target.value })}
+                  >
+                    {Object.entries(INDIAN_STATES).map(([code, name]) => (
+                      <option key={code} value={code}>
+                        {code} - {name}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="form-hint">Clean 2-digit GST state code. Defaults to 24 (Gujarat).</span>
                 </div>
 
                 <button type="submit" className="btn btn-primary" disabled={creatingCustomer}>
@@ -1958,19 +2238,25 @@ export default function App() {
                       <tr>
                         <th>Name</th>
                         <th>Mobile</th>
-                        <th>Address</th>
+                        <th>State / Place of Supply</th>
                         <th>GSTIN</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {customers.map((c) => (
-                        <tr key={c.id}>
-                          <td style={{ fontWeight: 600 }}>{c.name}</td>
-                          <td>{c.mobile || '—'}</td>
-                          <td>{c.address || '—'}</td>
-                          <td>{c.gstin || <span style={{ color: 'var(--text-muted)' }}>Consumer</span>}</td>
-                        </tr>
-                      ))}
+                      {customers.map((c) => {
+                        const code = resolveCustomerStateCode(c) || '24';
+                        return (
+                          <tr key={c.id}>
+                            <td style={{ fontWeight: 600 }}>{c.name}</td>
+                            <td>{c.mobile || '—'}</td>
+                            <td>
+                              <span style={{ fontWeight: 500 }}>{getStateNameByCode(code)}</span>{' '}
+                              <span style={{ color: 'var(--text-muted)', fontSize: '0.8125rem' }}>({code})</span>
+                            </td>
+                            <td>{c.gstin || <span style={{ color: 'var(--text-muted)' }}>Consumer</span>}</td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -2184,7 +2470,7 @@ export default function App() {
             {/* Sub-tab 1: Sales Report */}
             {reportSubTab === 'sales' && salesReportData && (
               <div>
-                <div className="stats-grid">
+                <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
                   <div className="stat-card">
                     <div className="stat-label">Total Sales In Period</div>
                     <div className="stat-value">₹{Number(salesReportData.summary?.totalSales || 0).toLocaleString('en-IN')}</div>
@@ -2195,11 +2481,18 @@ export default function App() {
                     <div className="stat-value">₹{Number(salesReportData.summary?.taxableTotal || 0).toLocaleString('en-IN')}</div>
                   </div>
                   <div className="stat-card">
-                    <div className="stat-label">GST Collected</div>
+                    <div className="stat-label">Intra-state GST (CGST+SGST)</div>
                     <div className="stat-value">
                       ₹{(Number(salesReportData.summary?.cgstTotal || 0) + Number(salesReportData.summary?.sgstTotal || 0)).toLocaleString('en-IN')}
                     </div>
                     <div className="stat-hint">CGST: ₹{salesReportData.summary?.cgstTotal} | SGST: ₹{salesReportData.summary?.sgstTotal}</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-label">Inter-state IGST</div>
+                    <div className="stat-value" style={{ color: '#6B21A8' }}>
+                      ₹{Number(salesReportData.summary?.igstTotal || 0).toLocaleString('en-IN')}
+                    </div>
+                    <div className="stat-hint">Integrated GST (Inter-state)</div>
                   </div>
                 </div>
 
@@ -2213,22 +2506,45 @@ export default function App() {
                             <th>Invoice No</th>
                             <th>Date</th>
                             <th>Customer</th>
+                            <th>Tax Type</th>
                             <th style={{ textAlign: 'right' }}>Taxable</th>
-                            <th style={{ textAlign: 'right' }}>GST</th>
+                            <th style={{ textAlign: 'right' }}>CGST+SGST</th>
+                            <th style={{ textAlign: 'right' }}>IGST</th>
                             <th style={{ textAlign: 'right' }}>Bill Total</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {salesReportData.invoices.map((inv) => (
-                            <tr key={inv.id}>
-                              <td style={{ fontWeight: 600 }}>{inv.invoiceNumber}</td>
-                              <td>{new Date(inv.invoiceDate || inv.createdAt).toLocaleDateString('en-IN')}</td>
-                              <td>{inv.customer?.name}</td>
-                              <td style={{ textAlign: 'right' }}>₹{Number(inv.taxableTotal).toFixed(2)}</td>
-                              <td style={{ textAlign: 'right' }}>₹{(Number(inv.cgstTotal) + Number(inv.sgstTotal)).toFixed(2)}</td>
-                              <td style={{ textAlign: 'right', fontWeight: 600 }}>₹{Number(inv.billAmount).toFixed(2)}</td>
-                            </tr>
-                          ))}
+                          {salesReportData.invoices.map((inv) => {
+                            const isInterstate = inv.taxType === 'INTERSTATE';
+                            return (
+                              <tr key={inv.id}>
+                                <td style={{ fontWeight: 600 }}>{inv.invoiceNumber}</td>
+                                <td>{new Date(inv.invoiceDate || inv.createdAt).toLocaleDateString('en-IN')}</td>
+                                <td>{inv.customer?.name}</td>
+                                <td>
+                                  <span style={{
+                                    display: 'inline-block',
+                                    padding: '2px 8px',
+                                    borderRadius: '4px',
+                                    fontSize: '0.75rem',
+                                    fontWeight: 600,
+                                    background: isInterstate ? '#F3E8FF' : '#E0F2FE',
+                                    color: isInterstate ? '#6B21A8' : '#0369A1',
+                                  }}>
+                                    {isInterstate ? 'Inter-state' : 'Intra-state'}
+                                  </span>
+                                </td>
+                                <td style={{ textAlign: 'right' }}>₹{Number(inv.taxableTotal).toFixed(2)}</td>
+                                <td style={{ textAlign: 'right' }}>
+                                  {isInterstate ? '—' : `₹${(Number(inv.cgstTotal) + Number(inv.sgstTotal)).toFixed(2)}`}
+                                </td>
+                                <td style={{ textAlign: 'right', color: isInterstate ? '#6B21A8' : undefined, fontWeight: isInterstate ? 600 : 400 }}>
+                                  {isInterstate ? `₹${Number(inv.igstTotal || 0).toFixed(2)}` : '—'}
+                                </td>
+                                <td style={{ textAlign: 'right', fontWeight: 600 }}>₹{Number(inv.billAmount).toFixed(2)}</td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
@@ -2306,7 +2622,7 @@ export default function App() {
                       <thead>
                         <tr>
                           <th>Item</th>
-                          <th>HSN</th>
+                          <th>HSN/SAC Code</th>
                           <th style={{ textAlign: 'right' }}>Cost Price</th>
                           <th style={{ textAlign: 'right' }}>Selling Price</th>
                           <th style={{ textAlign: 'right' }}>Current Stock</th>

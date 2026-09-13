@@ -4,6 +4,7 @@ import prisma from '../db.js';
 import { calculateLineItem, calculateInvoiceTotals } from '../utils/billingMath.js';
 import { getNextInvoiceNumber } from '../utils/invoiceNumber.js';
 import { generateInvoicePDF } from '../utils/pdfGenerator.js';
+import { resolveCustomerStateCode, determineTaxType } from '../utils/gstStates.js';
 
 const router = Router();
 const Decimal = Prisma.Decimal;
@@ -20,7 +21,44 @@ router.get('/', async (req, res) => {
     });
     res.json(invoices);
   } catch (error) {
+    console.error('Error fetching invoices:', error);
     res.status(500).json({ error: 'Failed to fetch invoices', details: error.message });
+  }
+});
+
+// GET /invoices/:id - fetch single invoice with details
+router.get('/:id', async (req, res) => {
+  try {
+    const invoice = await prisma.invoice.findFirst({
+      where: {
+        OR: [
+          { id: req.params.id },
+          { invoiceNumber: req.params.id },
+        ],
+      },
+      include: {
+        customer: true,
+        items: {
+          include: {
+            product: true,
+          },
+        },
+        returns: {
+          include: {
+            items: true,
+          },
+        },
+      },
+    });
+
+    if (!invoice) {
+      return res.status(404).json({ error: 'Invoice not found' });
+    }
+
+    res.json(invoice);
+  } catch (error) {
+    console.error('Error fetching invoice:', error);
+    res.status(500).json({ error: 'Failed to fetch invoice', details: error.message });
   }
 });
 
@@ -58,28 +96,6 @@ router.get('/:id/pdf', async (req, res) => {
   }
 });
 
-// GET /invoices/:id - Return the saved invoice as JSON
-router.get('/:id', async (req, res) => {
-  try {
-    const invoice = await prisma.invoice.findUnique({
-      where: { id: req.params.id },
-      include: {
-        customer: true,
-        items: true, // Snapshots are preserved on items
-      },
-    });
-
-    if (!invoice) {
-      return res.status(404).json({ error: 'Invoice not found' });
-    }
-
-    res.json(invoice);
-  } catch (error) {
-    console.error('Error fetching invoice:', error);
-    res.status(500).json({ error: 'Failed to fetch invoice', details: error.message });
-  }
-});
-
 // POST /invoices - Create Invoice
 router.post('/', async (req, res) => {
   try {
@@ -89,6 +105,7 @@ router.post('/', async (req, res) => {
       invoiceDate,
       paymentStatus = 'UNPAID',
       paymentMethod = null,
+      taxType: requestedTaxType,
       items, // array of { productId, qty, rate? }
     } = req.body;
 
@@ -108,6 +125,25 @@ router.post('/', async (req, res) => {
       });
       if (!customer) {
         throw new Error(`Customer not found with id: ${customerId}`);
+      }
+
+      const company = await tx.companySettings.findFirst();
+
+      // Resolve state code and tax type using strict precedence
+      const customerStateCode = resolveCustomerStateCode(customer) || (customer.state ? customer.state.trim() : null);
+
+      let finalTaxType = requestedTaxType === 'INTERSTATE' || requestedTaxType === 'INTRASTATE'
+        ? requestedTaxType
+        : null;
+
+      if (!finalTaxType) {
+        if (!customerStateCode) {
+          throw new Error('Customer state or GSTIN is required to determine tax type (Intra-state vs Inter-state)');
+        }
+        finalTaxType = determineTaxType({
+          customerStateCode,
+          companyGstin: company?.gstin,
+        });
       }
 
       // 2. Determine invoiceNumber atomically
@@ -141,11 +177,12 @@ router.post('/', async (req, res) => {
         // Determine rate (excl. GST)
         const rate = item.rate !== undefined && item.rate !== null ? new Decimal(item.rate) : new Decimal(product.sellingPrice);
 
-        // Calculate line item with Prisma.Decimal end-to-end
+        // Calculate line item with Prisma.Decimal end-to-end according to taxType
         const calc = calculateLineItem({
           qty: requestedQty,
           rate,
           gstRate: product.gstRate,
+          taxType: finalTaxType,
         });
 
         lineCalculations.push(calc);
@@ -160,6 +197,7 @@ router.post('/', async (req, res) => {
           taxableValue: calc.taxableValue,
           cgstAmount: calc.cgstAmount,
           sgstAmount: calc.sgstAmount,
+          igstAmount: calc.igstAmount,
           amount: calc.amount,
         });
 
@@ -196,7 +234,7 @@ router.post('/', async (req, res) => {
       }
 
       // 4. Calculate invoice totals using Prisma.Decimal end-to-end
-      const totals = calculateInvoiceTotals(lineCalculations);
+      const totals = calculateInvoiceTotals(lineCalculations, finalTaxType);
 
       // 5. Write invoice + invoice_items
       const invoice = await tx.invoice.create({
@@ -204,9 +242,11 @@ router.post('/', async (req, res) => {
           invoiceNumber: finalInvoiceNumber,
           invoiceDate: invoiceDate ? new Date(invoiceDate) : new Date(),
           customerId: customer.id,
+          taxType: finalTaxType,
           taxableTotal: totals.taxableTotal,
           cgstTotal: totals.cgstTotal,
           sgstTotal: totals.sgstTotal,
+          igstTotal: totals.igstTotal,
           roundOff: totals.roundOff,
           billAmount: totals.billAmount,
           paymentStatus,

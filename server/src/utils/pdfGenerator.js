@@ -2,6 +2,7 @@ import PDFDocument from 'pdfkit';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
+import { getStateNameByCode, resolveCustomerStateCode } from './gstStates.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -254,12 +255,14 @@ export function generateInvoicePDF(invoice, company, options = {}) {
       doc.fillColor('#0f172a').font('Helvetica-Bold').fontSize(8.5);
       doc.text(custGstin, 50, y + 50);
 
-      // Place of Supply info
-      const stateCode = compGstin && compGstin.length >= 2 ? compGstin.slice(0, 2) : '24';
+      // Place of Supply info (Mandatory GST compliance)
+      const customerStateCode = resolveCustomerStateCode(invoice.customer) || invoice.customer?.state || '24';
+      const placeOfSupplyName = getStateNameByCode(customerStateCode);
+
       doc.fillColor('#475569').font('Helvetica').fontSize(8.5);
-      doc.text(`State Code: ${stateCode}`, 380, y + 22, { width: 165, align: 'right' });
-      doc.text('Reverse Charge: No', 380, y + 36, { width: 165, align: 'right' });
-      doc.text(`Payment: ${invoice.paymentMethod || 'CASH'}`, 380, y + 50, { width: 165, align: 'right' });
+      doc.text(`Place of Supply: ${placeOfSupplyName} (${customerStateCode})`, 330, y + 12, { width: 215, align: 'right' });
+      doc.text('Reverse Charge: No', 330, y + 26, { width: 215, align: 'right' });
+      doc.text(`Payment: ${invoice.paymentMethod || 'CASH'}`, 330, y + 40, { width: 215, align: 'right' });
 
       // ==========================================
       // 3. ITEMS TABLE (WITH UNIT & CLARIFIED GST%)
@@ -270,7 +273,7 @@ export function generateInvoicePDF(invoice, company, options = {}) {
       doc.fillColor('#0f172a').fontSize(7.5).font('Helvetica-Bold');
       doc.text('#', 40, y + 7, { width: 20 });
       doc.text('DESCRIPTION OF GOODS', 62, y + 7, { width: 175 });
-      doc.text('HSN', 240, y + 7, { width: 42, align: 'center' });
+      doc.text('HSN/SAC', 238, y + 7, { width: 46, align: 'center' });
       doc.text('QTY', 284, y + 7, { width: 32, align: 'right' });
       doc.text('UNIT', 318, y + 7, { width: 38, align: 'center' });
       doc.text('RATE (Rs)', 358, y + 7, { width: 48, align: 'right' });
@@ -325,14 +328,17 @@ export function generateInvoicePDF(invoice, company, options = {}) {
       }
       doc.font('Helvetica');
 
-      // Right Box: Totals Table with Labeled CGST/SGST Rates
+      // Right Box: Totals Table with conditional CGST/SGST vs IGST
       doc.rect(326, summaryStartY, 233, boxHeight).fill('#ffffff');
       doc.rect(326, summaryStartY, 233, boxHeight).stroke('#e2e8f0');
 
-      // Determine effective CGST/SGST rate from items
+      const isInterstate = invoice.taxType === 'INTERSTATE';
+
+      // Determine effective GST rate from items
       const sampleGstRate = invoice.items && invoice.items.length > 0 && invoice.items[0].gstRateSnapshot !== undefined
         ? Number(invoice.items[0].gstRateSnapshot)
         : 0;
+      const formattedRate = sampleGstRate.toFixed(1).replace(/\.0$/, '');
       const halfRate = (sampleGstRate / 2).toFixed(1).replace(/\.0$/, '');
 
       let ty = summaryStartY + 8;
@@ -346,10 +352,17 @@ export function generateInvoicePDF(invoice, company, options = {}) {
       };
 
       addTotalRow('Taxable Total:', Number(invoice.taxableTotal || 0).toFixed(2));
-      const cgstLabel = Number(halfRate) > 0 ? `CGST @ ${halfRate}%:` : 'CGST:';
-      const sgstLabel = Number(halfRate) > 0 ? `SGST @ ${halfRate}%:` : 'SGST:';
-      addTotalRow(cgstLabel, Number(invoice.cgstTotal || 0).toFixed(2));
-      addTotalRow(sgstLabel, Number(invoice.sgstTotal || 0).toFixed(2));
+
+      if (isInterstate) {
+        const igstLabel = Number(formattedRate) > 0 ? `IGST @ ${formattedRate}%:` : 'IGST:';
+        addTotalRow(igstLabel, Number(invoice.igstTotal || 0).toFixed(2));
+      } else {
+        const cgstLabel = Number(halfRate) > 0 ? `CGST @ ${halfRate}%:` : 'CGST:';
+        const sgstLabel = Number(halfRate) > 0 ? `SGST @ ${halfRate}%:` : 'SGST:';
+        addTotalRow(cgstLabel, Number(invoice.cgstTotal || 0).toFixed(2));
+        addTotalRow(sgstLabel, Number(invoice.sgstTotal || 0).toFixed(2));
+      }
+
       if (Number(invoice.roundOff || 0) !== 0) {
         addTotalRow('Round Off:', Number(invoice.roundOff).toFixed(2));
       }
