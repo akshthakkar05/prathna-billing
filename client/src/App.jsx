@@ -242,11 +242,11 @@ export default function App() {
     }
   });
 
-  // Login & Register Form State (pre-fills with last used email or default)
-  const [loginForm, setLoginForm] = useState(() => ({
-    email: localStorage.getItem("prathna_last_email") || "prijs24@gmail.com",
+  // Login & Register Form State (starts completely blank)
+  const [loginForm, setLoginForm] = useState({
+    email: "",
     password: "",
-  }));
+  });
   const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [hasExistingUsers, setHasExistingUsers] = useState(true);
   const [registerForm, setRegisterForm] = useState({
@@ -542,7 +542,6 @@ export default function App() {
       localStorage.setItem("prathna_token", data.token);
       localStorage.setItem("prathna_user", JSON.stringify(data.user));
       localStorage.setItem("prathna_session_date", today);
-      localStorage.setItem("prathna_last_email", loginForm.email.trim());
       showToast(`Welcome back, ${data.user.name}`);
       if (data.user?.mustChangePassword) {
         setShowPasswordChangeModal(true);
@@ -587,7 +586,6 @@ export default function App() {
       localStorage.setItem("prathna_token", data.token);
       localStorage.setItem("prathna_user", JSON.stringify(data.user));
       localStorage.setItem("prathna_session_date", today);
-      localStorage.setItem("prathna_last_email", registerForm.email.trim());
       showToast(`Account created. Welcome, ${data.user.name}`);
     } catch (err) {
       let msg = err.message || "Failed to create account. Please try again.";
@@ -608,12 +606,16 @@ export default function App() {
   const handleLogout = (msg) => {
     setToken("");
     setCurrentUser(null);
+    setLoginForm({ email: "", password: "" });
+    setRegisterForm({ name: "", email: "", password: "" });
+    setLoginError("");
     setShowPasswordChangeModal(false);
     localStorage.removeItem("prathna_token");
     localStorage.removeItem("prathna_user");
     localStorage.removeItem("prathna_session_date");
     localStorage.removeItem("prathna_active_tab");
     localStorage.removeItem("prathna_report_sub_tab");
+    localStorage.removeItem("prathna_last_email");
     if (window.location.hash) {
       window.history.replaceState(
         null,
@@ -1912,7 +1914,7 @@ export default function App() {
                       setLoginForm({ ...loginForm, email: e.target.value })
                     }
                     placeholder="Enter your registered email"
-                    autoComplete="email"
+                    autoComplete="off"
                     required
                   />
                 </div>
@@ -1939,7 +1941,7 @@ export default function App() {
                       setLoginForm({ ...loginForm, password: e.target.value })
                     }
                     placeholder="Enter your account password"
-                    autoComplete="current-password"
+                    autoComplete="new-password"
                     required
                   />
                   <button
