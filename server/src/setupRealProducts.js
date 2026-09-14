@@ -49,22 +49,22 @@ async function setupRealProducts() {
   console.log('[setup] Reset invoice counter (next invoice will be INV-1001)');
 
   // 7. Ensure Admin User exists with secure hashed password
-  const hashedPassword = await bcrypt.hash('Password@123', 10);
+  const hashedPassword = await bcrypt.hash('Prathna@10', 10);
   await prisma.user.upsert({
-    where: { email: 'admin@prathna.com' },
+    where: { email: 'prijs24@gmail.com' },
     update: {
-      name: 'Prathna Admin',
+      name: 'Admin',
       password: hashedPassword,
       mustChangePassword: false,
     },
     create: {
-      name: 'Prathna Admin',
-      email: 'admin@prathna.com',
+      name: 'Admin',
+      email: 'prijs24@gmail.com',
       password: hashedPassword,
       mustChangePassword: false,
     },
   });
-  console.log('[setup] Primary admin user ready (admin@prathna.com)');
+  console.log('[setup] Primary admin user ready (prijs24@gmail.com)');
 
   // 8. Create Walk-in Counter Customer
   await prisma.customer.create({
@@ -113,29 +113,31 @@ async function setupRealProducts() {
     await prisma.companySettings.update({
       where: { id: company.id },
       data: {
-        name: 'Prathna Enterprises',
-        gstin: '24AAACP9988P1Z8',
-        phone: '+91 98765 43210',
-        address: 'Ahmedabad, Gujarat, India',
+        name: 'Prathna Enterprise',
+        gstin: '24AKBPC4941M1ZA',
+        pan: 'AKBPC4941M',
+        phone: '+91 99099 48775',
+        address: 'C-7, Lalbhai Centre, Opp. Edan Park Society, Mani Nagar East, Ahmedabad, Gujarat - 380008',
         logoUrl: '/assets/logo/prathna-logo.png',
-        terms: '1. Goods once sold will not be taken back.\n2. Interest @ 18% p.a. will be charged if bill is not paid on presentation.\n3. Subject to Ahmedabad jurisdiction.',
+        terms: '1. Goods once sold will not be taken back or exchanged.\n2. Subject to Ahmedabad Jurisdiction.\n3. Warranty for the goods received by me is responsibility of the manufacturer and PE is not reliable for the same.',
         termsGujarati: '૧. વેચેલો માલ પાછો લેવામાં આવશે નહીં.\n૨. બિલની રકમ સમયસર ન ચૂકવાય તો વાર્ષિક ૧૮% વ્યાજ લેવામાં આવશે.\n૩. તમામ વિવાદો અમદાવાદ ન્યાયાલયને આધીન રહેશે.',
       },
     });
   } else {
     await prisma.companySettings.create({
       data: {
-        name: 'Prathna Enterprises',
-        gstin: '24AAACP9988P1Z8',
-        phone: '+91 98765 43210',
-        address: 'Ahmedabad, Gujarat, India',
+        name: 'Prathna Enterprise',
+        gstin: '24AKBPC4941M1ZA',
+        pan: 'AKBPC4941M',
+        phone: '+91 99099 48775',
+        address: 'C-7, Lalbhai Centre, Opp. Edan Park Society, Mani Nagar East, Ahmedabad, Gujarat - 380008',
         logoUrl: '/assets/logo/prathna-logo.png',
-        terms: '1. Goods once sold will not be taken back.\n2. Interest @ 18% p.a. will be charged if bill is not paid on presentation.\n3. Subject to Ahmedabad jurisdiction.',
+        terms: '1. Goods once sold will not be taken back or exchanged.\n2. Subject to Ahmedabad Jurisdiction.\n3. Warranty for the goods received by me is responsibility of the manufacturer and PE is not reliable for the same.',
         termsGujarati: '૧. વેચેલો માલ પાછો લેવામાં આવશે નહીં.\n૨. બિલની રકમ સમયસર ન ચૂકવાય તો વાર્ષિક ૧૮% વ્યાજ લેવામાં આવશે.\n૩. તમામ વિવાદો અમદાવાદ ન્યાયાલયને આધીન રહેશે.',
       },
     });
   }
-  console.log('[setup] Company Settings configured (Prathna Enterprises with Gujarati Terms & Logo)');
+  console.log('[setup] Company Settings configured (Prathna Enterprise with Gujarati Terms & Logo)');
 
   console.log('\n[setup] Database is clean and ready for real counter billing.');
 }

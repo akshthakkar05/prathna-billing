@@ -1561,7 +1561,7 @@ export default function App() {
               className="mobile-brand-logo"
             />
           ) : (
-            <span className="mobile-brand-title">{companySettings.name || 'Prathna Enterprises'}</span>
+            <span className="mobile-brand-title">{companySettings.name || 'Prathna Enterprise'}</span>
           )}
         </div>
         <button
@@ -1712,7 +1712,7 @@ export default function App() {
                   />
                 )}
                 <div>
-                  <h1 className="page-title" style={{ marginBottom: 2 }}>{companySettings.name || 'Prathna Enterprises'}</h1>
+                  <h1 className="page-title" style={{ marginBottom: 2 }}>{companySettings.name || 'Prathna Enterprise'}</h1>
                   <p className="page-subtitle">Store Billing Counter — Operational Dashboard</p>
                 </div>
               </div>
@@ -4201,7 +4201,7 @@ export default function App() {
                     className="form-input"
                     value={companySettings.name || ''}
                     onChange={(e) => setCompanySettings({ ...companySettings, name: e.target.value })}
-                    placeholder="e.g. Prathna Enterprises"
+                    placeholder="e.g. Prathna Enterprise"
                     required
                   />
                 </div>

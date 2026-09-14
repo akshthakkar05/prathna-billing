@@ -17,7 +17,7 @@ router.get('/status', async (req, res) => {
     ]);
     res.json({
       hasUsers: userCount > 0,
-      company: company || { name: 'Prathna Enterprises', logoUrl: null },
+      company: company || { name: 'Prathna Enterprise', logoUrl: null },
     });
   } catch (error) {
     console.error('Error checking auth status:', error);
