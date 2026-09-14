@@ -169,7 +169,28 @@ const checkIsRegisterHash = () => {
   }
 };
 
-export const API_BASE_URL = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '');
+const resolveApiBaseUrl = () => {
+  if (import.meta.env.VITE_API_URL && import.meta.env.VITE_API_URL.trim()) {
+    return import.meta.env.VITE_API_URL.trim().replace(/\/+$/, '');
+  }
+  if (typeof window !== 'undefined' && (window.location.hostname.includes('vercel.app') || window.location.hostname.includes('prathna'))) {
+    return 'https://prathna-billing.onrender.com';
+  }
+  return '';
+};
+
+export const API_BASE_URL = resolveApiBaseUrl();
+
+export const parseSafeJson = async (res) => {
+  if (!res) return {};
+  try {
+    const text = await res.text();
+    if (!text || !text.trim()) return {};
+    return JSON.parse(text);
+  } catch {
+    return {};
+  }
+};
 
 export const getApiUrl = (endpoint) => {
   if (!endpoint) return '';
@@ -463,16 +484,25 @@ export default function App() {
     setLoginError("");
     setLoggingIn(true);
     try {
-      const res = await fetch(getApiUrl("/auth/login"), {
+      const targetUrl = getApiUrl("/auth/login");
+      const res = await fetch(targetUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(loginForm),
       });
-      const data = await res.json();
+      const data = await parseSafeJson(res);
       if (!res.ok) {
+        if (res.status === 502 || res.status === 503) {
+          throw new Error(
+            "Backend server is starting up (Render free tier). Please wait ~15 seconds and try again.",
+          );
+        }
         throw new Error(
           data.error || "Incorrect email or password. Please try again.",
         );
+      }
+      if (!data.token) {
+        throw new Error("Invalid response received from server. Please try again.");
       }
       setToken(data.token);
       setCurrentUser(data.user);
@@ -486,9 +516,17 @@ export default function App() {
         setShowPasswordChangeModal(true);
       }
     } catch (err) {
-      setLoginError(
-        err.message || "Incorrect email or password. Please try again.",
-      );
+      let msg = err.message || "Incorrect email or password. Please try again.";
+      if (
+        msg.includes("JSON") ||
+        msg.includes("Unexpected") ||
+        msg.includes("Failed to fetch") ||
+        msg.includes("NetworkError")
+      ) {
+        msg =
+          "Connecting to backend server... (Render free tier spins down when inactive and takes ~20s to wake up). Please try again in a moment.";
+      }
+      setLoginError(msg);
     } finally {
       setLoggingIn(false);
     }
@@ -504,9 +542,12 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(registerForm),
       });
-      const data = await res.json();
+      const data = await parseSafeJson(res);
       if (!res.ok) {
         throw new Error(data.error || "Failed to create account");
+      }
+      if (!data.token) {
+        throw new Error("Invalid response received from server. Please try again.");
       }
       setToken(data.token);
       setCurrentUser(data.user);
@@ -517,9 +558,16 @@ export default function App() {
       localStorage.setItem("prathna_last_email", registerForm.email.trim());
       showToast(`Account created. Welcome, ${data.user.name}`);
     } catch (err) {
-      setLoginError(
-        err.message || "Failed to create account. Please try again.",
-      );
+      let msg = err.message || "Failed to create account. Please try again.";
+      if (
+        msg.includes("JSON") ||
+        msg.includes("Unexpected") ||
+        msg.includes("Failed to fetch")
+      ) {
+        msg =
+          "Backend server is waking up. Please wait 15 seconds and try again.";
+      }
+      setLoginError(msg);
     } finally {
       setLoggingIn(false);
     }
