@@ -22,6 +22,9 @@ import {
   X,
   Lock,
   Eye,
+  EyeOff,
+  Mail,
+  ShieldCheck,
   FileText,
   Upload,
   Menu,
@@ -135,22 +138,59 @@ function getInitialNavigation() {
   }
 }
 
+const getTodayDateString = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+const checkIsRegisterHash = () => {
+  try {
+    const rawHash = window.location.hash.replace(/^#\/?/, '').trim().toLowerCase();
+    return ['register', 'signup', 'create-account'].includes(rawHash);
+  } catch {
+    return false;
+  }
+};
+
 export default function App() {
-  // Authentication State
-  const [token, setToken] = useState(() => localStorage.getItem('prathna_token') || '');
+  // Authentication State with 1-Login-Per-Day Session Logic
+  const [token, setToken] = useState(() => {
+    try {
+      const savedToken = localStorage.getItem('prathna_token');
+      const sessionDate = localStorage.getItem('prathna_session_date');
+      const today = getTodayDateString();
+      if (savedToken && sessionDate === today) {
+        return savedToken;
+      }
+      return '';
+    } catch {
+      return '';
+    }
+  });
+
   const [currentUser, setCurrentUser] = useState(() => {
     try {
       const saved = localStorage.getItem('prathna_user');
-      return saved ? JSON.parse(saved) : null;
+      const sessionDate = localStorage.getItem('prathna_session_date');
+      const today = getTodayDateString();
+      if (saved && sessionDate === today) {
+        return JSON.parse(saved);
+      }
+      return null;
     } catch {
       return null;
     }
   });
 
-  // Login & Register Form State
-  const [loginForm, setLoginForm] = useState({ email: '', password: '' });
+  // Login & Register Form State (pre-fills with last used email or default)
+  const [loginForm, setLoginForm] = useState(() => ({
+    email: localStorage.getItem('prathna_last_email') || 'prijs24@gmail.com',
+    password: '',
+  }));
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
+  const [hasExistingUsers, setHasExistingUsers] = useState(true);
   const [registerForm, setRegisterForm] = useState({ name: '', email: '', password: '' });
-  const [isRegisterMode, setIsRegisterMode] = useState(false);
+  const [isRegisterMode, setIsRegisterMode] = useState(() => checkIsRegisterHash());
   const [loggingIn, setLoggingIn] = useState(false);
   const [loginError, setLoginError] = useState('');
 
@@ -354,8 +394,11 @@ export default function App() {
       }
       setToken(data.token);
       setCurrentUser(data.user);
+      const today = getTodayDateString();
       localStorage.setItem('prathna_token', data.token);
       localStorage.setItem('prathna_user', JSON.stringify(data.user));
+      localStorage.setItem('prathna_session_date', today);
+      localStorage.setItem('prathna_last_email', loginForm.email.trim());
       showToast(`Welcome back, ${data.user.name}`);
       if (data.user?.mustChangePassword) {
         setShowPasswordChangeModal(true);
@@ -383,8 +426,11 @@ export default function App() {
       }
       setToken(data.token);
       setCurrentUser(data.user);
+      const today = getTodayDateString();
       localStorage.setItem('prathna_token', data.token);
       localStorage.setItem('prathna_user', JSON.stringify(data.user));
+      localStorage.setItem('prathna_session_date', today);
+      localStorage.setItem('prathna_last_email', registerForm.email.trim());
       showToast(`Account created. Welcome, ${data.user.name}`);
     } catch (err) {
       setLoginError(err.message || 'Failed to create account. Please try again.');
@@ -399,6 +445,7 @@ export default function App() {
     setShowPasswordChangeModal(false);
     localStorage.removeItem('prathna_token');
     localStorage.removeItem('prathna_user');
+    localStorage.removeItem('prathna_session_date');
     localStorage.removeItem('prathna_active_tab');
     localStorage.removeItem('prathna_report_sub_tab');
     if (window.location.hash) {
@@ -665,9 +712,16 @@ export default function App() {
     }
   }, [token, activeTab, reportSubTab]);
 
-  // Synchronize activeTab and reportSubTab with URL hash and localStorage
+  // Synchronize activeTab, reportSubTab, and Auth states with URL hash and localStorage
   useEffect(() => {
     try {
+      if (!token) {
+        const targetHash = isRegisterMode ? '#register' : '#login';
+        if (window.location.hash !== targetHash) {
+          window.history.replaceState(null, '', targetHash);
+        }
+        return;
+      }
       localStorage.setItem('prathna_active_tab', activeTab);
       localStorage.setItem('prathna_report_sub_tab', reportSubTab);
       const targetHash = activeTab === 'reports' ? `#reports/${reportSubTab}` : `#${activeTab}`;
@@ -677,11 +731,14 @@ export default function App() {
     } catch (e) {
       console.error('Failed to sync navigation state:', e);
     }
-  }, [activeTab, reportSubTab]);
+  }, [token, isRegisterMode, activeTab, reportSubTab]);
 
-  // Support browser Back and Forward navigation buttons
+  // Support browser Back, Forward, and direct hash navigation (e.g. #register, #invoice, #reports/stock)
   useEffect(() => {
     const handleHashChange = () => {
+      const isReg = checkIsRegisterHash();
+      setIsRegisterMode(isReg);
+
       const nav = getInitialNavigation();
       setActiveTab(nav.tab);
       if (nav.tab === 'reports' && nav.reportSubTab) {
@@ -1385,11 +1442,16 @@ export default function App() {
   };
 
   // =========================================================================
-  // IF NOT LOGGED IN -> RENDER CLEAN WHITE LOGIN SCREEN
+  // IF NOT LOGGED IN -> RENDER MODERN LOGIN SCREEN
   // =========================================================================
   if (!token) {
     return (
       <div className="login-screen">
+        {/* Background ambient lighting effects */}
+        <div className="login-ambient-orb login-ambient-orb-1" />
+        <div className="login-ambient-orb login-ambient-orb-2" />
+        <div className="login-ambient-orb login-ambient-orb-3" />
+
         {toast && (
           <div className="toast-container">
             <div className={`toast ${toast.type === 'error' ? 'toast-error' : 'toast-success'}`}>
@@ -1404,117 +1466,165 @@ export default function App() {
             {companySettings.logoUrl ? (
               <img
                 src={companySettings.logoUrl}
-                alt={companySettings.name || 'Company Logo'}
+                alt={companySettings.name || 'Prathna Enterprises'}
                 className="login-logo"
               />
             ) : (
-              <h1 className="login-title">{companySettings.name || 'Store Billing Counter'}</h1>
+              <div className="login-brand-fallback">
+                <div className="login-brand-icon-wrap">
+                  <Building2 size={32} />
+                </div>
+                <h1 className="login-title">{companySettings.name || 'Prathna Enterprise'}</h1>
+              </div>
             )}
-            <p className="login-subtitle">
-              {isRegisterMode ? 'Create initial shop owner login' : 'Log in to open the billing counter'}
-            </p>
+            {isRegisterMode && (
+              <h2 className="login-register-title">Create Admin Account</h2>
+            )}
           </div>
 
           {loginError && (
-            <div className="banner banner-error">
+            <div className="banner banner-error login-error-banner">
               <AlertCircle size={18} style={{ flexShrink: 0, marginTop: '2px' }} />
               <span>{loginError}</span>
             </div>
           )}
 
           {isRegisterMode ? (
-            <form onSubmit={handleRegister}>
+            <form onSubmit={handleRegister} className="login-form">
               <div className="form-group">
                 <label className="form-label">Full Name</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  value={registerForm.name}
-                  onChange={(e) => setRegisterForm({ ...registerForm, name: e.target.value })}
-                  placeholder="Full Name (e.g. Prathna Staff)"
-                  required
-                />
+                <div className="input-with-icon-wrap">
+                  <span className="input-field-icon"><Users size={16} /></span>
+                  <input
+                    type="text"
+                    className="form-input input-with-icon"
+                    value={registerForm.name}
+                    onChange={(e) => setRegisterForm({ ...registerForm, name: e.target.value })}
+                    placeholder="e.g. Prathna Staff"
+                    required
+                  />
+                </div>
               </div>
 
               <div className="form-group">
                 <label className="form-label">Email Address</label>
-                <input
-                  type="email"
-                  className="form-input"
-                  value={registerForm.email}
-                  onChange={(e) => setRegisterForm({ ...registerForm, email: e.target.value })}
-                  placeholder="Email Address (e.g. admin@prathna.com)"
-                  required
-                />
+                <div className="input-with-icon-wrap">
+                  <span className="input-field-icon"><Mail size={16} /></span>
+                  <input
+                    type="email"
+                    className="form-input input-with-icon"
+                    value={registerForm.email}
+                    onChange={(e) => setRegisterForm({ ...registerForm, email: e.target.value })}
+                    placeholder="e.g. prijs24@gmail.com"
+                    autoComplete="email"
+                    required
+                  />
+                </div>
               </div>
 
               <div className="form-group">
                 <label className="form-label">Password</label>
-                <input
-                  type="password"
-                  className="form-input"
-                  value={registerForm.password}
-                  onChange={(e) => setRegisterForm({ ...registerForm, password: e.target.value })}
-                  placeholder="Create a password (min 6 characters)"
-                  required
-                />
+                <div className="input-with-icon-wrap">
+                  <span className="input-field-icon"><Lock size={16} /></span>
+                  <input
+                    type="password"
+                    className="form-input input-with-icon"
+                    value={registerForm.password}
+                    onChange={(e) => setRegisterForm({ ...registerForm, password: e.target.value })}
+                    placeholder="Create a password (min 6 chars)"
+                    autoComplete="new-password"
+                    required
+                  />
+                </div>
               </div>
 
-              <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '8px' }} disabled={loggingIn}>
-                {loggingIn ? 'Creating account...' : 'Create Account & Log In'}
+              <button type="submit" className="btn btn-primary login-submit-btn" disabled={loggingIn}>
+                {loggingIn ? (
+                  <>
+                    <RefreshCw size={16} className="spin-icon" />
+                    <span>Creating account...</span>
+                  </>
+                ) : (
+                  <>
+                    <ShieldCheck size={16} />
+                    <span>Create Account & Log In</span>
+                  </>
+                )}
               </button>
 
-              <div style={{ marginTop: '16px', textAlign: 'center', fontSize: '0.875rem' }}>
-                <span style={{ color: 'var(--text-secondary)' }}>Already have an account? </span>
+              <div className="login-footer-links">
+                <span className="login-footer-text">Already have an account? </span>
                 <button
                   type="button"
-                  onClick={() => { setIsRegisterMode(false); setLoginError(''); }}
-                  style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', fontWeight: 600 }}
+                  onClick={() => {
+                    setIsRegisterMode(false);
+                    setLoginError('');
+                    window.location.hash = '#login';
+                  }}
+                  className="login-toggle-link"
                 >
                   Log in here
                 </button>
               </div>
             </form>
           ) : (
-            <form onSubmit={handleLogin}>
-              <div className="form-group">
-                <label className="form-label">Email Address</label>
-                <input
-                  type="email"
-                  className="form-input"
-                  value={loginForm.email}
-                  onChange={(e) => setLoginForm({ ...loginForm, email: e.target.value })}
-                  placeholder="e.g. admin@prathna.com"
-                  required
-                />
+            <form onSubmit={handleLogin} className="login-form">
+              <div className="form-group login-form-group">
+                <label className="form-label login-input-label">Email Address</label>
+                <div className="input-with-icon-wrap">
+                  <span className="input-field-icon"><Mail size={18} /></span>
+                  <input
+                    type="email"
+                    className="form-input input-with-icon"
+                    value={loginForm.email}
+                    onChange={(e) => setLoginForm({ ...loginForm, email: e.target.value })}
+                    placeholder="e.g. prijs24@gmail.com"
+                    autoComplete="email"
+                    required
+                  />
+                </div>
               </div>
 
-              <div className="form-group">
-                <label className="form-label">Password</label>
-                <input
-                  type="password"
-                  className="form-input"
-                  value={loginForm.password}
-                  onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
-                  placeholder="Enter your account password"
-                  required
-                />
+              <div className="form-group login-form-group">
+                <div className="form-label-row">
+                  <label className="form-label login-input-label" style={{ marginBottom: 0 }}>Password</label>
+                </div>
+                <div className="input-with-icon-wrap">
+                  <span className="input-field-icon"><Lock size={18} /></span>
+                  <input
+                    type={showLoginPassword ? 'text' : 'password'}
+                    className="form-input input-with-icon input-with-action"
+                    value={loginForm.password}
+                    onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
+                    placeholder="Enter your account password"
+                    autoComplete="current-password"
+                    required
+                  />
+                  <button
+                    type="button"
+                    className="password-toggle-btn"
+                    onClick={() => setShowLoginPassword(!showLoginPassword)}
+                    tabIndex={-1}
+                    aria-label={showLoginPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showLoginPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
               </div>
 
-              <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '8px' }} disabled={loggingIn}>
-                {loggingIn ? 'Logging in...' : 'Log In to Billing'}
+              <button type="submit" className="btn btn-primary login-submit-btn" disabled={loggingIn}>
+                {loggingIn ? (
+                  <>
+                    <RefreshCw size={18} className="spin-icon" />
+                    <span>Opening Counter...</span>
+                  </>
+                ) : (
+                  <>
+                    <ShieldCheck size={18} />
+                    <span>Log In to Billing</span>
+                  </>
+                )}
               </button>
-
-              <div style={{ marginTop: '16px', textAlign: 'center', fontSize: '0.875rem' }}>
-                <span style={{ color: 'var(--text-secondary)' }}>Setting up a new counter? </span>
-                <button
-                  type="button"
-                  onClick={() => { setIsRegisterMode(true); setLoginError(''); }}
-                  style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', fontWeight: 600 }}
-                >
-                  Create first account
-                </button>
-              </div>
             </form>
           )}
         </div>
