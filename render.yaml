@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: prathna-billing-backend
+    runtime: node
+    plan: free
+    rootDir: server
+    buildCommand: npm install && npx prisma generate && npx prisma db push
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 5000
+      - key: DATABASE_URL
+        sync: false # Set in Render Dashboard from Supabase (Transaction Pooler URI: 6543)
+      - key: DIRECT_URL
+        sync: false # Set in Render Dashboard from Supabase (Direct URI: 5432)
+      - key: JWT_SECRET
+        generateValue: true
+      - key: CORS_ORIGIN
+        value: "*" # Or set to your Vercel frontend domain: https://your-app.vercel.app
