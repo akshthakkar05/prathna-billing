@@ -201,6 +201,17 @@ export const getApiUrl = (endpoint) => {
   return `${API_BASE_URL}${cleanEndpoint}`;
 };
 
+export const getLogoSrc = (logoUrl) => {
+  if (!logoUrl) return '/assets/logo/prathna-logo.png';
+  if (logoUrl.startsWith('data:') || logoUrl.startsWith('blob:') || logoUrl.startsWith('http://') || logoUrl.startsWith('https://')) {
+    return logoUrl;
+  }
+  if (logoUrl.startsWith('/assets/')) {
+    return logoUrl; // Bundled static asset (instant 0ms load)
+  }
+  return getApiUrl(logoUrl);
+};
+
 export default function App() {
   // Authentication State with 1-Login-Per-Day Session Logic
   const [token, setToken] = useState(() => {
@@ -277,15 +288,36 @@ export default function App() {
   const [salesTrendRange, setSalesTrendRange] = useState("7d");
   const [loadingDashboard, setLoadingDashboard] = useState(false);
   const [hoveredTrendBar, setHoveredTrendBar] = useState(null);
-  const [companySettings, setCompanySettings] = useState({
-    name: "",
-    address: "",
-    phone: "",
-    gstin: "",
-    pan: "",
-    logoUrl: "",
-    terms: "",
-    termsGujarati: "",
+  const [companySettings, setCompanySettings] = useState(() => {
+    try {
+      const cached = localStorage.getItem("prathna_company_settings");
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed && typeof parsed === "object") {
+          return {
+            name: "Prathna Enterprise",
+            address: "",
+            phone: "",
+            gstin: "",
+            pan: "",
+            logoUrl: "/assets/logo/prathna-logo.png",
+            terms: "",
+            termsGujarati: "",
+            ...parsed,
+          };
+        }
+      }
+    } catch {}
+    return {
+      name: "Prathna Enterprise",
+      address: "",
+      phone: "",
+      gstin: "",
+      pan: "",
+      logoUrl: "/assets/logo/prathna-logo.png",
+      terms: "",
+      termsGujarati: "",
+    };
   });
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const logoInputRef = useRef(null);
@@ -720,7 +752,12 @@ export default function App() {
       setSuppliers(Array.isArray(sData) ? sData : []);
       setPurchases(Array.isArray(puData) ? puData : []);
       setInvoices(Array.isArray(invData) ? invData : []);
-      if (setData && !setData.error) setCompanySettings(setData);
+      if (setData && !setData.error) {
+        setCompanySettings(setData);
+        try {
+          localStorage.setItem("prathna_company_settings", JSON.stringify(setData));
+        } catch {}
+      }
       if (dashData && !dashData.error) {
         setDashboardSummary(dashData);
       } else {
@@ -1344,6 +1381,9 @@ export default function App() {
       if (!res.ok) throw new Error(data.error || "Failed to update settings");
 
       setCompanySettings(data);
+      try {
+        localStorage.setItem("prathna_company_settings", JSON.stringify(data));
+      } catch {}
       showToast("Company details saved successfully!", "success");
     } catch (err) {
       showToast(err.message, "error");
@@ -1384,10 +1424,16 @@ export default function App() {
           const data = await res.json();
           if (!res.ok) throw new Error(data.error || "Failed to upload logo");
 
-          setCompanySettings((prev) => ({
-            ...prev,
-            logoUrl: data.logoUrl,
-          }));
+          setCompanySettings((prev) => {
+            const updated = {
+              ...prev,
+              logoUrl: data.logoUrl,
+            };
+            try {
+              localStorage.setItem("prathna_company_settings", JSON.stringify(updated));
+            } catch {}
+            return updated;
+          });
           showToast("Company logo updated successfully!", "success");
         } catch (uploadErr) {
           showToast(uploadErr.message, "error");
@@ -1725,25 +1771,12 @@ export default function App() {
         )}
 
         <div className="login-card">
-          <div
-            className={`login-header ${companySettings.logoUrl ? "login-header-centered" : ""}`}
-          >
-            {companySettings.logoUrl ? (
-              <img
-                src={getApiUrl(companySettings.logoUrl)}
-                alt={companySettings.name || "Prathna Enterprises"}
-                className="login-logo"
-              />
-            ) : (
-              <div className="login-brand-fallback">
-                <div className="login-brand-icon-wrap">
-                  <Building2 size={32} />
-                </div>
-                <h1 className="login-title">
-                  {companySettings.name || "Prathna Enterprise"}
-                </h1>
-              </div>
-            )}
+          <div className="login-header login-header-centered">
+            <img
+              src={getLogoSrc(companySettings.logoUrl)}
+              alt={companySettings.name || "Prathna Enterprise"}
+              className="login-logo"
+            />
             {isRegisterMode && (
               <h2 className="login-register-title">Create Admin Account</h2>
             )}
@@ -1989,17 +2022,11 @@ export default function App() {
           {mobileMenuOpen ? <X size={22} /> : <Menu size={22} />}
         </button>
         <div className="mobile-brand">
-          {companySettings.logoUrl ? (
-            <img
-              src={getApiUrl(companySettings.logoUrl)}
-              alt={companySettings.name || "Company Logo"}
-              className="mobile-brand-logo"
-            />
-          ) : (
-            <span className="mobile-brand-title">
-              {companySettings.name || "Prathna Enterprise"}
-            </span>
-          )}
+          <img
+            src={getLogoSrc(companySettings.logoUrl)}
+            alt={companySettings.name || "Company Logo"}
+            className="mobile-brand-logo"
+          />
         </div>
         <button
           type="button"
@@ -2024,17 +2051,11 @@ export default function App() {
       <aside className={`sidebar ${mobileMenuOpen ? "sidebar-open" : ""}`}>
         <div className="sidebar-header">
           <div className="sidebar-header-top">
-            {companySettings.logoUrl ? (
-              <img
-                src={getApiUrl(companySettings.logoUrl)}
-                alt={companySettings.name || "Company Logo"}
-                className="sidebar-logo"
-              />
-            ) : (
-              <div className="sidebar-title">
-                {companySettings.name || "Your Company Name"}
-              </div>
-            )}
+            <img
+              src={getLogoSrc(companySettings.logoUrl)}
+              alt={companySettings.name || "Company Logo"}
+              className="sidebar-logo"
+            />
             <button
               type="button"
               className="mobile-close-btn"
