@@ -7,6 +7,7 @@ import { getStateNameByCode, resolveCustomerStateCode } from './gstStates.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const gujaratiFontPath = path.resolve(__dirname, '../../assets/fonts/NotoSansGujarati-Regular.ttf');
+const gujaratiBoldFontPath = path.resolve(__dirname, '../../assets/fonts/NotoSansGujarati-Bold.ttf');
 
 const DEFAULT_GUJARATI_TERMS = `૧. વેચેલો માલ પાછો લેવામાં આવશે નહીં.
 ૨. બિલની રકમ સમયસર ન ચૂકવાય તો વાર્ષિક ૧૮% વ્યાજ લેવામાં આવશે.
@@ -108,10 +109,20 @@ export function segmentTextByScript(text) {
 /**
  * Renders mixed text switching fonts per script segment.
  * Ensures zero tofu boxes for English lines or company names.
+ * @param {PDFKit.PDFDocument} doc
+ * @param {string} fullText
+ * @param {number} x
+ * @param {number} y
+ * @param {number} width
+ * @param {number} [fontSize=7.5]
+ * @param {number} [lineSpacing=2.8]
+ * @param {boolean} [isBold=false]
+ * @param {string} [customColor=null]
  */
-export function renderMixedText(doc, fullText, x, y, width, fontSize = 7.5, lineSpacing = 2.8) {
+export function renderMixedText(doc, fullText, x, y, width, fontSize = 7.5, lineSpacing = 2.8, isBold = false, customColor = null) {
   const lines = fullText.split('\n');
   let currentY = y;
+  const hasBoldGujarati = fs.existsSync(gujaratiBoldFontPath);
 
   for (const line of lines) {
     if (!line.trim()) {
@@ -123,10 +134,20 @@ export function renderMixedText(doc, fullText, x, y, width, fontSize = 7.5, line
     let currentX = x;
 
     for (const seg of segments) {
-      const fontName = seg.isGujarati ? 'gujarati' : 'Helvetica';
+      let fontName = 'Helvetica';
+      if (seg.isGujarati) {
+        fontName = isBold && hasBoldGujarati ? 'gujarati-bold' : 'gujarati';
+      } else {
+        fontName = isBold ? 'Helvetica-Bold' : 'Helvetica';
+      }
+
       doc.font(fontName).fontSize(fontSize);
 
-      if (seg.isGujarati) {
+      if (customColor) {
+        doc.fillColor(customColor);
+      } else if (isBold) {
+        doc.fillColor('#0f172a');
+      } else if (seg.isGujarati) {
         doc.fillColor('#334155');
       } else {
         doc.fillColor('#0f172a');
@@ -172,6 +193,10 @@ export function generateInvoicePDF(invoice, company, options = {}) {
       const hasGujaratiFont = fs.existsSync(gujaratiFontPath);
       if (hasGujaratiFont) {
         doc.registerFont('gujarati', gujaratiFontPath);
+      }
+      const hasGujaratiBoldFont = fs.existsSync(gujaratiBoldFontPath);
+      if (hasGujaratiBoldFont) {
+        doc.registerFont('gujarati-bold', gujaratiBoldFontPath);
       }
 
       const buffers = [];
@@ -480,9 +505,8 @@ export function generateInvoicePDF(invoice, company, options = {}) {
 
       // --- Right Column: Gujarati Terms ---
       if (cleanGujTerms && hasGujaratiFont) {
-        doc.fillColor('#0f172a').font('Helvetica-Bold').fontSize(7.5);
-        renderMixedText(doc, 'શરતો અને નિયમો:', rightColX, y + 7, colWidth - 8, 7.5, 2);
-        renderMixedText(doc, cleanGujTerms, rightColX, y + 18, colWidth - 8, 6.8, 2);
+        renderMixedText(doc, 'શરતો અને નિયમો:', rightColX, y + 7, colWidth - 8, 7.5, 2, true, '#0f172a');
+        renderMixedText(doc, cleanGujTerms, rightColX, y + 18, colWidth - 8, 6.8, 2, false, '#475569');
       } else {
         doc.fillColor('#0f172a').font('Helvetica-Bold').fontSize(7.5);
         doc.text('TERMS & CONDITIONS:', rightColX, y + 7);
