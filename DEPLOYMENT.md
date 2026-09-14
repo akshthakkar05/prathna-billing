@@ -36,7 +36,7 @@ This guide walks you step-by-step through deploying the billing & inventory syst
    - **Environment**: `Node`
    - **Region**: `Singapore` or `Frankfurt` (choose closest to Supabase)
    - **Branch**: `main`
-   - **Build Command**: `npm install && npx prisma generate && npx prisma db push`
+   - **Build Command**: `npm install && npx prisma generate`
    - **Start Command**: `npm start`
    - **Plan**: `Free`
 5. In the **Environment Variables** section, add:
@@ -45,12 +45,12 @@ This guide walks you step-by-step through deploying the billing & inventory syst
    | `NODE_ENV` | `production` | Production mode |
    | `PORT` | `5000` | Render port |
    | `DATABASE_URL` | *Your Supabase Transaction Pooler URI (Port 6543)* | From Step 1 |
-   | `DIRECT_URL` | *Your Supabase Direct URI (Port 5432)* | From Step 1 |
-   | `JWT_SECRET` | *Generate a random 64-character secret* | e.g. `prathna_secure_jwt_secret_token_key_2026` |
-   | `CORS_ORIGIN` | `*` | Or set to your Vercel frontend domain |
+   | `DIRECT_URL` | *Your Supabase Session Pooler URI (Port 5432)* | From Step 1 |
+   | `JWT_SECRET` | `089441f64633038f3363fc0e185d30e6f1ea7d41f559af015b9af750a4bf208753091f9c4e1d65edc1fbc0a26f7d5d95e792cd5b73ddf44d81e6994c1ac7d1f4` | 512-bit JWT secret |
+   | `CORS_ORIGIN` | `https://prathna-billing.vercel.app` | Vercel frontend domain |
 
 6. Click **Create Web Service**.
-7. Render will automatically build the service, run `prisma db push` to initialize all PostgreSQL tables in Supabase, and start the server.
+7. Render will install dependencies, generate the Prisma client, and start the backend service.
 8. Copy your live Render URL (e.g. `https://prathna-billing-backend.onrender.com`).
 
 ---
