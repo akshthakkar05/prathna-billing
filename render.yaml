@@ -12,7 +12,7 @@ services:
       - key: PORT
         value: 5000
       - key: DATABASE_URL
-        value: postgresql://postgres.aropeqsqfwbrhyfyeekw:prathna-enterprise@aws-0-ap-northeast-1.pooler.supabase.com:6543/postgres?pgbouncer=true&connection_limit=1
+        value: postgresql://postgres.aropeqsqfwbrhyfyeekw:prathna-enterprise@aws-0-ap-northeast-1.pooler.supabase.com:6543/postgres?pgbouncer=true&connection_limit=15&pool_timeout=20
       - key: DIRECT_URL
         value: postgresql://postgres.aropeqsqfwbrhyfyeekw:prathna-enterprise@aws-0-ap-northeast-1.pooler.supabase.com:5432/postgres
       - key: JWT_SECRET
