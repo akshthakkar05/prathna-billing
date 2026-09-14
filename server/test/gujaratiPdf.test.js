@@ -9,13 +9,9 @@ import prisma from '../src/db.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const CLIENT_GUJARATI_TERMS = `શરતો અને નિયમો:
-
-1. એકવાર વેચાયેલો માલ પાછો લેવામાં કે બદલવામાં આવશે નહીં.
-2. વોરંટી ગ્રાહકે કંપની પાસેથી મેળવવાની રહેશે.
-3. ન્યાય ક્ષેત્ર અમદાવાદ રહેશે.
-
-For, PRATHNA ENTERPRISE`;
+const CLIENT_GUJARATI_TERMS = `૧. વેચેલો માલ પાછો લેવામાં આવશે નહીં.
+૨. બિલની રકમ સમયસર ન ચૂકવાય તો વાર્ષિક ૧૮% વ્યાજ લેવામાં આવશે.
+૩. તમામ વિવાદો અમદાવાદ ન્યાયાલયને આધીન રહેશે.`;
 
 const mockInvoice = {
   invoiceNumber: 'INV-1099',

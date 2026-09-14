@@ -199,24 +199,21 @@ test('End-to-End Invoice Creation: Intrastate vs Interstate with PDF generation 
     },
   });
 
-  // Create an admin user to get auth token
-  const testUser = await prisma.user.upsert({
-    where: { email: 'admin@prathna.com' },
-    update: { mustChangePassword: false },
-    create: {
-      name: 'Admin',
-      email: 'admin@prathna.com',
-      password: 'hashedpassword',
-      mustChangePassword: false,
-    },
-  });
-
-  const loginRes = await fetch(`${baseUrl}/auth/login`, {
+  let loginRes = await fetch(`${baseUrl}/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: 'admin@prathna.com', password: 'password123' }),
+    body: JSON.stringify({ email: 'prijs24@gmail.com', password: 'Prathna@10' }),
   });
-  const { token } = await loginRes.json();
+  let loginData = await loginRes.json();
+  if (!loginData.token) {
+    loginRes = await fetch(`${baseUrl}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'admin@prathna.com', password: 'password123' }),
+    });
+    loginData = await loginRes.json();
+  }
+  const token = loginData.token;
   assert.ok(token, 'Must receive auth token');
 
   // 4. Create Intrastate Invoice

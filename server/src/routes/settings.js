@@ -22,9 +22,8 @@ const DEFAULT_SETTINGS = {
   phone: '',
   gstin: '',
   pan: '',
-  logoUrl: null,
-  terms: '1. Goods once sold will not be taken back.\n2. Subject to local jurisdiction.',
-  termsGujarati: 'શરતો અને નિયમો:\n\n૧. એકવાર વેચેલો માલ પાછો લેવામાં આવશે નહીં.\n૨. વોરંટી કંપનીના નિયમો મુજબ રહેશે.\n૩. ન્યાય ક્ષેત્ર સ્થાનિક રહેશે.',
+  terms: '1. Goods once sold will not be taken back or exchanged.\n2. Subject to Ahmedabad Jurisdiction.\n3. Warranty for the goods received by me is responsibility of the manufacturer and PE is not reliable for the same.',
+  termsGujarati: '૧. વેચેલો માલ પાછો લેવામાં આવશે નહીં.\n૨. બિલની રકમ સમયસર ન ચૂકવાય તો વાર્ષિક ૧૮% વ્યાજ લેવામાં આવશે.\n૩. તમામ વિવાદો અમદાવાદ ન્યાયાલયને આધીન રહેશે.',
 };
 
 // GET /settings - get current company settings

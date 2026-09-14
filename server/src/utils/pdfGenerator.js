@@ -8,11 +8,9 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const gujaratiFontPath = path.resolve(__dirname, '../../assets/fonts/NotoSansGujarati-Regular.ttf');
 
-const DEFAULT_GUJARATI_TERMS = `શરતો અને નિયમો:
-
-1. એકવાર વેચાયેલો માલ પાછો લેવામાં કે બદલવામાં આવશે નહીં.
-2. વોરંટી ગ્રાહકે કંપની પાસેથી મેળવવાની રહેશે.
-3. ન્યાય ક્ષેત્ર સ્થાનિક રહેશે.`;
+const DEFAULT_GUJARATI_TERMS = `૧. વેચેલો માલ પાછો લેવામાં આવશે નહીં.
+૨. બિલની રકમ સમયસર ન ચૂકવાય તો વાર્ષિક ૧૮% વ્યાજ લેવામાં આવશે.
+૩. તમામ વિવાદો અમદાવાદ ન્યાયાલયને આધીન રહેશે.`;
 
 /**
  * Converts a numerical currency amount to Indian Numbering words (Lakhs / Crores).
@@ -217,33 +215,43 @@ export function generateInvoicePDF(invoice, company, options = {}) {
         }
       }
 
-      const headerMeta = [];
-      if (compPhone) headerMeta.push(`Phone: ${compPhone}`);
-      if (compGstin) headerMeta.push(`GSTIN: ${compGstin}`);
-      if (compPan) headerMeta.push(`PAN: ${compPan}`);
+      const line1Meta = [];
+      if (compPhone) line1Meta.push(`Phone: ${compPhone}`);
+      if (compGstin) line1Meta.push(`GSTIN: ${compGstin}`);
 
       if (hasRenderedLogo) {
-        // Since logo already contains "PRATHNA ENTERPRISES", suppress duplicate title text
-        // and place address / GSTIN / PAN alongside the logo
+        // Since logo already contains branding graphic, place address / GSTIN / PAN alongside the logo
         if (compAddress) {
-          doc.fillColor('#e2e8f0').fontSize(8.5).font('Helvetica');
-          doc.text(compAddress, 132, 50, { width: 225 });
+          doc.fillColor('#e2e8f0').fontSize(8).font('Helvetica');
+          doc.text(compAddress, 132, 44, { width: 225 });
         }
-        if (headerMeta.length > 0) {
-          doc.fillColor('#94a3b8').fontSize(8).font('Helvetica');
-          doc.text(headerMeta.join(' | '), 132, compAddress ? 74 : 56, { width: 225 });
+        
+        let metaY = compAddress ? 68 : 50;
+        doc.fillColor('#94a3b8').fontSize(7.8).font('Helvetica');
+        if (line1Meta.length > 0) {
+          doc.text(line1Meta.join(' | '), 132, metaY, { width: 225 });
+          metaY += 10.5;
+        }
+        if (compPan) {
+          doc.text(`PAN: ${compPan}`, 132, metaY, { width: 225 });
         }
       } else {
-        // Fallback: Text-only header matching existing layout
+        // Fallback: Text-only header
         doc.fillColor('#ffffff').fontSize(16).font('Helvetica-Bold');
-        doc.text(compName.toUpperCase(), 50, 48);
+        doc.text(compName.toUpperCase(), 50, 44);
 
-        doc.fillColor('#94a3b8').fontSize(8.5).font('Helvetica');
+        doc.fillColor('#94a3b8').fontSize(8).font('Helvetica');
+        let textY = 62;
         if (compAddress) {
-          doc.text(compAddress, 50, 70, { width: 300 });
+          doc.text(compAddress, 50, textY, { width: 300 });
+          textY += 18;
         }
-        if (headerMeta.length > 0) {
-          doc.text(headerMeta.join(' | '), 50, compAddress ? 92 : 75);
+        if (line1Meta.length > 0) {
+          doc.text(line1Meta.join(' | '), 50, textY);
+          textY += 10.5;
+        }
+        if (compPan) {
+          doc.text(`PAN: ${compPan}`, 50, textY);
         }
       }
 
@@ -273,28 +281,34 @@ export function generateInvoicePDF(invoice, company, options = {}) {
       doc.rect(36, y, contentWidth, 68).fill('#f8fafc');
       doc.rect(36, y, contentWidth, 68).stroke('#e2e8f0');
 
-      doc.fillColor('#475569').fontSize(8).font('Helvetica-Bold');
-      doc.text('BILLED TO (CUSTOMER):', 50, y + 10);
-      doc.fillColor('#0f172a').fontSize(10).font('Helvetica-Bold');
-      doc.text(invoice.customer?.name || 'Cash Customer', 50, y + 22);
+      doc.fillColor('#475569').fontSize(7.5).font('Helvetica-Bold');
+      doc.text('BILLED TO (CUSTOMER):', 48, y + 8);
+      
+      doc.fillColor('#0f172a').fontSize(9.5).font('Helvetica-Bold');
+      doc.text(invoice.customer?.name || 'Cash Customer', 48, y + 20, { width: 270 });
 
-      doc.fillColor('#475569').fontSize(8.5).font('Helvetica');
-      const custPhone = invoice.customer?.mobile ? `Phone: ${invoice.customer.mobile}` : '';
-      const custAddr = invoice.customer?.address ? `Address: ${invoice.customer.address}` : '';
-      doc.text(`${custPhone} ${custAddr ? ' | ' + custAddr : ''}`, 50, y + 36, { width: 320 });
-
+      // Phone & GSTIN on dedicated line
+      const custMeta = [];
+      if (invoice.customer?.mobile) custMeta.push(`Phone: ${invoice.customer.mobile}`);
       const custGstin = invoice.customer?.gstin ? `GSTIN: ${invoice.customer.gstin}` : 'Unregistered Consumer';
-      doc.fillColor('#0f172a').font('Helvetica-Bold').fontSize(8.5);
-      doc.text(custGstin, 50, y + 50);
+      custMeta.push(custGstin);
+
+      doc.fillColor('#0f172a').font('Helvetica-Bold').fontSize(8);
+      doc.text(custMeta.join(' | '), 48, y + 34, { width: 270 });
+
+      // Address on dedicated bottom line
+      doc.fillColor('#475569').font('Helvetica').fontSize(7.5);
+      const custAddr = invoice.customer?.address ? invoice.customer.address : 'Counter Sale';
+      doc.text(`Address: ${custAddr}`, 48, y + 47, { width: 270, height: 16 });
 
       // Place of Supply info (Mandatory GST compliance)
       const customerStateCode = resolveCustomerStateCode(invoice.customer) || invoice.customer?.state || '24';
       const placeOfSupplyName = getStateNameByCode(customerStateCode);
 
       doc.fillColor('#475569').font('Helvetica').fontSize(8.5);
-      doc.text(`Place of Supply: ${placeOfSupplyName} (${customerStateCode})`, 330, y + 12, { width: 215, align: 'right' });
-      doc.text('Reverse Charge: No', 330, y + 26, { width: 215, align: 'right' });
-      doc.text(`Payment: ${invoice.paymentMethod || 'CASH'}`, 330, y + 40, { width: 215, align: 'right' });
+      doc.text(`Place of Supply: ${placeOfSupplyName} (${customerStateCode})`, 330, y + 10, { width: 215, align: 'right' });
+      doc.text('Reverse Charge: No', 330, y + 24, { width: 215, align: 'right' });
+      doc.text(`Payment: ${invoice.paymentMethod || 'CASH'}`, 330, y + 38, { width: 215, align: 'right' });
 
       // ==========================================
       // 3. ITEMS TABLE (WITH UNIT & CLARIFIED GST%)
@@ -340,30 +354,9 @@ export function generateInvoicePDF(invoice, company, options = {}) {
       }
 
       // ==========================================
-      // 4. TOTALS & TERMS BLOCK
+      // 4. TOTALS BREAKDOWN & FULL RECTANGLE GRAND TOTAL
       // ==========================================
-      y += 10;
-      const summaryStartY = y;
-      const boxHeight = 118;
-
-      // Left Box: Terms & Conditions with Segmented Mixed Gujarati/English Font
-      doc.rect(36, summaryStartY, 280, boxHeight).fill('#f8fafc');
-      doc.rect(36, summaryStartY, 280, boxHeight).stroke('#e2e8f0');
-
-      if (termsGujarati && hasGujaratiFont) {
-        renderMixedText(doc, termsGujarati, 46, summaryStartY + 10, 260, 7.5, 2.8);
-      } else {
-        doc.fillColor('#0f172a').font('Helvetica-Bold').fontSize(8);
-        doc.text('TERMS & CONDITIONS:', 46, summaryStartY + 10);
-        doc.fillColor('#64748b').font('Helvetica').fontSize(7.5);
-        doc.text(termsText, 46, summaryStartY + 24, { width: 260, lineGap: 3 });
-      }
-      doc.font('Helvetica');
-
-      // Right Box: Totals Table with conditional CGST/SGST vs IGST
-      doc.rect(326, summaryStartY, 233, boxHeight).fill('#ffffff');
-      doc.rect(326, summaryStartY, 233, boxHeight).stroke('#e2e8f0');
-
+      y += 8;
       const isInterstate = invoice.taxType === 'INTERSTATE';
 
       // Determine effective GST rate from items
@@ -373,13 +366,38 @@ export function generateInvoicePDF(invoice, company, options = {}) {
       const formattedRate = sampleGstRate.toFixed(1).replace(/\.0$/, '');
       const halfRate = (sampleGstRate / 2).toFixed(1).replace(/\.0$/, '');
 
-      let ty = summaryStartY + 8;
+      // Calculate total quantity across items
+      const totalQty = (invoice.items || []).reduce((sum, item) => sum + Number(item.qty || 0), 0);
+      const totalItems = (invoice.items || []).length;
+
+      // Count tax rows
+      let taxRowsCount = 1; // Taxable Total
+      if (isInterstate) {
+        taxRowsCount += 1; // IGST
+      } else {
+        taxRowsCount += 2; // CGST + SGST
+      }
+      if (Number(invoice.roundOff || 0) !== 0) {
+        taxRowsCount += 1;
+      }
+
+      const subtotalsHeight = taxRowsCount * 15 + 8;
+
+      // Subtotals card (Full width)
+      doc.rect(36, y, contentWidth, subtotalsHeight).fill('#ffffff');
+      doc.rect(36, y, contentWidth, subtotalsHeight).stroke('#e2e8f0');
+
+      // Left metadata inside subtotals: Total Items & Total Quantity
+      doc.fillColor('#64748b').font('Helvetica').fontSize(8);
+      doc.text(`Total Items: ${totalItems} | Total Quantity: ${totalQty}`, 48, y + 8);
+
+      let ty = y + 7;
       const addTotalRow = (label, val, bold = false) => {
         doc.fillColor(bold ? '#0f172a' : '#475569')
           .font(bold ? 'Helvetica-Bold' : 'Helvetica')
-          .fontSize(bold ? 9.5 : 8.5);
-        doc.text(label, 338, ty);
-        doc.text(`Rs. ${val}`, 440, ty, { width: 110, align: 'right' });
+          .fontSize(bold ? 9 : 8.5);
+        doc.text(label, 330, ty, { width: 100, align: 'right' });
+        doc.text(`Rs. ${val}`, 435, ty, { width: 115, align: 'right' });
         ty += 15;
       };
 
@@ -399,54 +417,101 @@ export function generateInvoicePDF(invoice, company, options = {}) {
         addTotalRow('Round Off:', Number(invoice.roundOff).toFixed(2));
       }
 
-      // Grand Bill Amount Bar
-      doc.rect(326, summaryStartY + 84, 233, 34).fill('#0f172a');
-      doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(10.5);
-      doc.text('GRAND TOTAL:', 338, summaryStartY + 95);
-      doc.fillColor('#38bdf8').fontSize(12.5);
-      doc.text(`Rs. ${Number(invoice.billAmount || 0).toFixed(2)}`, 430, summaryStartY + 94, { width: 120, align: 'right' });
+      y += subtotalsHeight;
+
+      // Grand Bill Amount Bar - FULL RECTANGLE SPANNING FULL WIDTH
+      const grandTotalBarHeight = 32;
+      doc.rect(36, y, contentWidth, grandTotalBarHeight).fill('#0f172a');
+      doc.fillColor('#ffffff').font('Helvetica-Bold').fontSize(11);
+      doc.text('GRAND TOTAL (INCL. GST):', 48, y + 10);
+      doc.fillColor('#38bdf8').fontSize(13);
+      doc.text(`Rs. ${Number(invoice.billAmount || 0).toFixed(2)}`, 350, y + 9, { width: 200, align: 'right' });
+
+      y += grandTotalBarHeight;
 
       // ==========================================
       // 5. AMOUNT IN WORDS
       // ==========================================
-      const wordsY = summaryStartY + boxHeight + 8;
-      doc.rect(36, wordsY, contentWidth, 22).fill('#f8fafc');
-      doc.rect(36, wordsY, contentWidth, 22).stroke('#e2e8f0');
+      y += 6;
+      doc.rect(36, y, contentWidth, 22).fill('#f8fafc');
+      doc.rect(36, y, contentWidth, 22).stroke('#e2e8f0');
 
       doc.fillColor('#0f172a').font('Helvetica-Bold').fontSize(8);
-      doc.text('Amount in Words:', 46, wordsY + 6);
+      doc.text('Amount in Words:', 46, y + 6);
       doc.fillColor('#334155').font('Helvetica').fontSize(8);
       const amountWords = numberToIndianWords(invoice.billAmount || 0);
-      doc.text(amountWords, 130, wordsY + 6, { width: 390 });
+      doc.text(amountWords, 130, y + 6, { width: 420 });
+
+      y += 22;
 
       // ==========================================
-      // 6. SIGNATURE SECTION (TWO-SIDED) & FOOTER
+      // 6. TERMS & CONDITIONS (BOTH ENGLISH & GUJARATI BELOW)
       // ==========================================
-      // Pull signature upward tightening the vertical rhythm
-      const sigY = wordsY + 36;
+      y += 8;
+      const termsBoxHeight = 74;
+      doc.rect(36, y, contentWidth, termsBoxHeight).fill('#f8fafc');
+      doc.rect(36, y, contentWidth, termsBoxHeight).stroke('#e2e8f0');
+
+      const colWidth = (contentWidth - 28) / 2; // ~247.64
+      const leftColX = 46;
+      const rightColX = 36 + (contentWidth / 2) + 8; // ~305.64
+
+      // Middle vertical separator
+      doc.strokeColor('#e2e8f0').lineWidth(0.8);
+      doc.moveTo(36 + contentWidth / 2, y + 6).lineTo(36 + contentWidth / 2, y + termsBoxHeight - 6).stroke();
+
+      // Clean English terms (strip duplicate headers and trailing signatures)
+      const cleanEngTerms = (termsText || '')
+        .replace(/^terms\s*(&|and)?\s*conditions:?\s*\n*/i, '')
+        .replace(/\n\s*for,?\s+.*$/i, '')
+        .trim();
+
+      // Clean Gujarati terms (strip duplicate headers and trailing signatures)
+      const cleanGujTerms = (termsGujarati || '')
+        .replace(/^શરતો\s*અને\s*નિયમો:?\s*\n*/i, '')
+        .replace(/\n\s*for,?\s+.*$/i, '')
+        .trim();
+
+      // --- Left Column: English Terms ---
+      doc.fillColor('#0f172a').font('Helvetica-Bold').fontSize(7.5);
+      doc.text('TERMS & CONDITIONS:', leftColX, y + 7);
+      doc.fillColor('#475569').font('Helvetica').fontSize(6.8);
+      doc.text(cleanEngTerms, leftColX, y + 18, { width: colWidth - 8, lineGap: 2 });
+
+      // --- Right Column: Gujarati Terms ---
+      if (cleanGujTerms && hasGujaratiFont) {
+        doc.fillColor('#0f172a').font('Helvetica-Bold').fontSize(7.5);
+        renderMixedText(doc, 'શરતો અને નિયમો:', rightColX, y + 7, colWidth - 8, 7.5, 2);
+        renderMixedText(doc, cleanGujTerms, rightColX, y + 18, colWidth - 8, 6.8, 2);
+      } else {
+        doc.fillColor('#0f172a').font('Helvetica-Bold').fontSize(7.5);
+        doc.text('TERMS & CONDITIONS:', rightColX, y + 7);
+        doc.fillColor('#475569').font('Helvetica').fontSize(6.8);
+        doc.text(cleanEngTerms, rightColX, y + 18, { width: colWidth - 8, lineGap: 2 });
+      }
+      doc.font('Helvetica');
+
+      y += termsBoxHeight;
+
+      // ==========================================
+      // 7. SIGNATURE SECTION (TWO-SIDED) & FOOTER
+      // ==========================================
+      const sigY = y + 14;
+      const lineY = sigY + 42; // Generous space for physical signature and stamp
 
       // Left: Customer Signature
       doc.strokeColor('#cbd5e1').lineWidth(0.8);
-      doc.moveTo(46, sigY + 32).lineTo(180, sigY + 32).stroke();
+      doc.moveTo(46, lineY).lineTo(180, lineY).stroke();
       doc.fillColor('#475569').font('Helvetica').fontSize(8);
-      doc.text("Customer's Signature", 46, sigY + 36);
+      doc.text("Customer's Signature", 46, lineY + 4);
 
       // Right: For Company / Authorised Signatory
       doc.fillColor('#0f172a').font('Helvetica-Bold').fontSize(8.5);
-      doc.text(`For ${compName}`, 360, sigY + 2, { width: 190, align: 'right' });
+      doc.text(`For ${compName}`, 360, sigY, { width: 190, align: 'right' });
       doc.strokeColor('#cbd5e1').lineWidth(0.8);
-      doc.moveTo(410, sigY + 32).lineTo(550, sigY + 32).stroke();
+      doc.moveTo(410, lineY).lineTo(550, lineY).stroke();
       doc.fillColor('#475569').font('Helvetica').fontSize(8);
-      doc.text('Authorised Signatory', 360, sigY + 36, { width: 190, align: 'right' });
-
-      // Disclaimer Note at center bottom
-      doc.fillColor('#94a3b8').font('Helvetica').fontSize(7.5);
-      doc.text(
-        'This is a computer-generated invoice and does not require a physical seal.',
-        36,
-        sigY + 54,
-        { width: contentWidth, align: 'center' }
-      );
+      doc.text('Authorised Signatory', 360, lineY + 4, { width: 190, align: 'right' });
 
       doc.end();
     } catch (err) {

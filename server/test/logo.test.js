@@ -20,12 +20,20 @@ test.before(async () => {
   });
 
   // Login to get auth token
-  const res = await fetch(`${baseUrl}/auth/login`, {
+  let res = await fetch(`${baseUrl}/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: 'admin@prathna.com', password: 'password123' }),
+    body: JSON.stringify({ email: 'prijs24@gmail.com', password: 'Prathna@10' }),
   });
-  const data = await res.json();
+  let data = await res.json();
+  if (!data.token) {
+    res = await fetch(`${baseUrl}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'admin@prathna.com', password: 'password123' }),
+    });
+    data = await res.json();
+  }
   token = data.token;
 });
 
@@ -49,7 +57,7 @@ test.after(async () => {
 
   await prisma.companySettings.updateMany({
     data: {
-      name: 'Prathna Enterprises',
+      name: 'Prathna Enterprise',
       logoUrl: '/assets/logo/prathna-logo.png',
     },
   });

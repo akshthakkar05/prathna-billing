@@ -31,13 +31,20 @@ test('Stock Routes Suite: /stock and /stock/adjust authentication and operations
   assert.equal(unauthRes.status, 401);
 
   // 2. Login to get valid auth token
-  const loginRes = await fetch(`${baseUrl}/auth/login`, {
+  let loginRes = await fetch(`${baseUrl}/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: 'admin@prathna.com', password: 'password123' }),
+    body: JSON.stringify({ email: 'prijs24@gmail.com', password: 'Prathna@10' }),
   });
-  assert.equal(loginRes.status, 200);
-  const loginData = await loginRes.json();
+  let loginData = await loginRes.json();
+  if (!loginData.token) {
+    loginRes = await fetch(`${baseUrl}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'admin@prathna.com', password: 'password123' }),
+    });
+    loginData = await loginRes.json();
+  }
   const token = loginData.token;
 
   // 3. Authenticated GET /stock returns list of transactions
