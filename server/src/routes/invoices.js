@@ -17,7 +17,7 @@ router.get('/', async (req, res) => {
 
     if (search && search.trim()) {
       const q = search.trim();
-      const numMatch = q.replace(/^inv-?/i, '').trim();
+      const numMatch = q.replace(/^(inv[/-]?(\d{4}[/-]|\d{2}-\d{2}[/-])?)/i, '').trim();
 
       where.OR = [
         { invoiceNumber: { contains: q, mode: 'insensitive' } },
@@ -219,7 +219,7 @@ router.post('/', async (req, res) => {
       // 2. Determine invoiceNumber atomically
       const finalInvoiceNumber = customInvoiceNumber
         ? customInvoiceNumber.trim()
-        : await getNextInvoiceNumber(tx);
+        : await getNextInvoiceNumber(tx, invoiceDate ? new Date(invoiceDate) : new Date());
 
       // 3. Process items, validate stock, and compute line items with Decimal
       const lineCalculations = [];

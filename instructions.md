@@ -91,3 +91,7 @@ VITE_API_URL=https://prathna-billing.onrender.com
    - The first request after a cold period takes ~20 seconds to wake up; subsequent requests respond in under 300ms.
 3. **Daily Login Session**:
    - Staff/admin sessions are authenticated with JSON Web Tokens (JWT) requiring 1 login per day.
+4. **GST Invoice Numbering**:
+   - Invoices are dynamically generated as `INV/<YYYY>/<Sequence>` (e.g. `INV/2026/1001`, `INV/2027/1002`).
+   - The year is calculated dynamically from the invoice date.
+   - Fully compliant with Rule 46(b) of the CGST Rules (13 characters, letters/digits/slashes).

@@ -10,7 +10,7 @@
     "postinstall": "prisma generate",
     "start:prod": "node src/index.js",
     "dev": "nodemon src/index.js",
-    "test": "node --test test/*.test.js",
+    "test": "node testGuard.js && node --test test/*.test.js",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",
     "db:status": "prisma migrate status",

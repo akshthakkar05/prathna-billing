@@ -1,12 +1,24 @@
 /**
- * Atomically generates the next sequential invoice number in format INV-<number>.
+ * Gets the 4-digit year dynamically from a date (e.g. 2026, 2027, etc.).
+ * @param {Date|string} [date]
+ * @returns {number}
+ */
+export function getInvoiceYear(date = new Date()) {
+  const d = date ? new Date(date) : new Date();
+  return isNaN(d.getTime()) ? new Date().getFullYear() : d.getFullYear();
+}
+
+/**
+ * Atomically generates the next sequential invoice number in format INV/<year>/<number> (e.g. "INV/2026/1001").
+ * The year is dynamically computed from the invoice date.
  * Uses PostgreSQL ON CONFLICT DO UPDATE ... RETURNING to guarantee row-level lock
  * and prevent duplicate numbers under high concurrency.
  *
  * @param {import('@prisma/client').PrismaClient} tx - Active Prisma transaction client
- * @returns {Promise<string>} Next invoice number, e.g. "INV-1001"
+ * @param {Date|string} [invoiceDate] - Optional invoice date
+ * @returns {Promise<string>} Next invoice number, e.g. "INV/2026/1001"
  */
-export async function getNextInvoiceNumber(tx) {
+export async function getNextInvoiceNumber(tx, invoiceDate = new Date()) {
   const result = await tx.$queryRaw`
     INSERT INTO "InvoiceCounter" ("name", "current")
     VALUES ('invoice', 1001)
@@ -16,5 +28,8 @@ export async function getNextInvoiceNumber(tx) {
   `;
 
   const currentNum = result[0].current;
-  return `INV-${currentNum}`;
+  const year = getInvoiceYear(invoiceDate);
+  return `INV/${year}/${currentNum}`;
 }
+
+
