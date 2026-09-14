@@ -12,10 +12,10 @@ services:
       - key: PORT
         value: 5000
       - key: DATABASE_URL
-        sync: false # Set in Render Dashboard from Supabase (Transaction Pooler URI: 6543)
+        value: postgresql://postgres.aropeqsqfwbrhyfyeekw:prathna-enterprise@aws-0-ap-northeast-1.pooler.supabase.com:6543/postgres?pgbouncer=true&connection_limit=1
       - key: DIRECT_URL
-        sync: false # Set in Render Dashboard from Supabase (Direct URI: 5432)
+        value: postgresql://postgres.aropeqsqfwbrhyfyeekw:prathna-enterprise@aws-0-ap-northeast-1.pooler.supabase.com:5432/postgres
       - key: JWT_SECRET
-        generateValue: true
+        value: 089441f64633038f3363fc0e185d30e6f1ea7d41f559af015b9af750a4bf208753091f9c4e1d65edc1fbc0a26f7d5d95e792cd5b73ddf44d81e6994c1ac7d1f4
       - key: CORS_ORIGIN
-        value: "*" # Or set to your Vercel frontend domain: https://your-app.vercel.app
+        value: https://prathna-billing.vercel.app
