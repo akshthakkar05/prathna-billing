@@ -778,7 +778,7 @@ export default function App() {
     }
   };
 
-  // Load initial data and dashboard summary with high-speed phased loading & caching
+  // Load initial data and dashboard summary with high-speed independent parallel fetches & caching
   const loadData = async () => {
     if (!token) return;
     if (!dashboardSummary) {
@@ -786,110 +786,63 @@ export default function App() {
     }
     setDataLoadError("");
 
-    // Phase 1: High-Priority Operational Data (Fast path: settings, dashboard, products, customers)
-    const fetchPhase1 = async () => {
+    const fetchEndpoint = async (url, setter, cacheKey, onData) => {
       try {
-        const [pRes, cRes, setRes, dashRes] = await Promise.all([
-          authFetch("/products"),
-          authFetch("/customers"),
-          authFetch("/settings"),
-          authFetch("/dashboard/summary"),
-        ]);
-
-        const [pData, cData, setData, dashData] = await Promise.all([
-          pRes.json(),
-          cRes.json(),
-          setRes.json(),
-          dashRes.json(),
-        ]);
-
-        if (Array.isArray(pData)) {
-          setProducts(pData);
-          setCachedState(CACHE_KEYS.PRODUCTS, pData);
+        const res = await authFetch(url);
+        const data = await res.json();
+        if (data && !data.error) {
+          setter(data);
+          if (cacheKey) setCachedState(cacheKey, data);
+          if (onData) onData(data);
         }
-        if (Array.isArray(cData)) {
-          setCustomers(cData);
-          setCachedState(CACHE_KEYS.CUSTOMERS, cData);
-          if (cData.length > 0 && !selectedCustomerId) {
-            setSelectedCustomerId(cData[0].id);
-          }
-        }
-        if (setData && !setData.error) {
-          setCompanySettings(setData);
-          try {
-            localStorage.setItem("prathna_company_settings", JSON.stringify(setData));
-          } catch {}
-        }
-        if (dashData && !dashData.error) {
-          setDashboardSummary(dashData);
-          setCachedState(CACHE_KEYS.DASHBOARD_SUMMARY, dashData);
-        } else {
-          setDataLoadError("Couldn't load dashboard summary — try refreshing");
-        }
+        return data;
       } catch (err) {
-        console.error("Phase 1 load error:", err);
-        throw err;
-      } finally {
-        setLoadingInitial(false);
+        console.warn(`Error fetching ${url}:`, err);
+        return null;
       }
     };
 
-    // Phase 2: Auxiliary & Historical Data (Background path: suppliers, purchases, invoices, trend, recent)
-    const fetchPhase2 = async () => {
-      try {
-        const [sRes, puRes, recRes, invRes, trendRes] = await Promise.all([
-          authFetch("/suppliers").catch(() => null),
-          authFetch("/purchases").catch(() => null),
-          authFetch("/customers/recent").catch(() => null),
-          authFetch("/invoices").catch(() => null),
-          authFetch("/dashboard/sales-trend?range=7d").catch(() => null),
-        ]);
-
-        const [sData, puData, recData, invData, trendData] = await Promise.all([
-          sRes ? sRes.json().catch(() => []) : [],
-          puRes ? puRes.json().catch(() => []) : [],
-          recRes ? recRes.json().catch(() => []) : [],
-          invRes ? invRes.json().catch(() => []) : [],
-          trendRes ? trendRes.json().catch(() => null) : null,
-        ]);
-
-        if (Array.isArray(sData)) {
-          setSuppliers(sData);
-          setCachedState(CACHE_KEYS.SUPPLIERS, sData);
-          if (sData.length > 0 && !selectedSupplierId) {
-            setSelectedSupplierId(sData[0].id);
-          }
-        }
-        if (Array.isArray(puData)) {
-          setPurchases(puData);
-          setCachedState(CACHE_KEYS.PURCHASES, puData);
-        }
-        if (Array.isArray(recData)) {
-          setRecentCustomers(recData);
-          setCachedState(CACHE_KEYS.RECENT_CUSTOMERS, recData);
-        }
-        if (Array.isArray(invData)) {
-          setInvoices(invData);
-          setCachedState(CACHE_KEYS.INVOICES, invData);
-        }
-        if (trendData && !trendData.error) {
-          setSalesTrend(trendData);
-          setCachedState(CACHE_KEYS.SALES_TREND, trendData);
-        }
-      } catch (err) {
-        console.warn("Phase 2 load error:", err);
+    // Fire all endpoints independently in parallel so every tab/table updates immediately upon arrival
+    const p1 = fetchEndpoint("/products", setProducts, CACHE_KEYS.PRODUCTS);
+    const p2 = fetchEndpoint("/customers", setCustomers, CACHE_KEYS.CUSTOMERS, (cData) => {
+      if (Array.isArray(cData) && cData.length > 0 && !selectedCustomerId) {
+        setSelectedCustomerId(cData[0].id);
       }
-    };
+    });
+    const p3 = fetchEndpoint("/settings", (setData) => {
+      if (setData && !setData.error) {
+        setCompanySettings(setData);
+        try {
+          localStorage.setItem("prathna_company_settings", JSON.stringify(setData));
+        } catch {}
+      }
+    });
+    const p4 = fetchEndpoint("/dashboard/summary", (dashData) => {
+      if (dashData && !dashData.error) {
+        setDashboardSummary(dashData);
+        setCachedState(CACHE_KEYS.DASHBOARD_SUMMARY, dashData);
+      }
+      setLoadingInitial(false);
+    });
+
+    const p5 = fetchEndpoint("/invoices", setInvoices, CACHE_KEYS.INVOICES);
+    const p6 = fetchEndpoint("/customers/recent", setRecentCustomers, CACHE_KEYS.RECENT_CUSTOMERS);
+    const p7 = fetchEndpoint("/suppliers", setSuppliers, CACHE_KEYS.SUPPLIERS, (sData) => {
+      if (Array.isArray(sData) && sData.length > 0 && !selectedSupplierId) {
+        setSelectedSupplierId(sData[0].id);
+      }
+    });
+    const p8 = fetchEndpoint("/purchases", setPurchases, CACHE_KEYS.PURCHASES);
+    const p9 = fetchEndpoint("/dashboard/sales-trend?range=7d", setSalesTrend, CACHE_KEYS.SALES_TREND);
 
     try {
-      await Promise.allSettled([fetchPhase1(), fetchPhase2()]);
+      await Promise.allSettled([p1, p2, p3, p4, p5, p6, p7, p8, p9]);
     } catch (err) {
-      console.error("Failed to load initial data:", err);
+      console.error("Failed to load store data:", err);
       if (err.message !== "Session expired") {
         const errorMsg =
-          err.message || "Couldn't load the dashboard — try refreshing";
+          err.message || "Couldn't load store data — try refreshing";
         setDataLoadError(errorMsg);
-        showToast("Couldn't load store data — try refreshing", "error");
       }
     } finally {
       setLoadingInitial(false);
