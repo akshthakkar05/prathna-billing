@@ -187,6 +187,20 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'Invoice must contain at least one product item' });
     }
 
+    let parsedInvoiceDate = new Date();
+    if (invoiceDate) {
+      const d = new Date(invoiceDate);
+      if (isNaN(d.getTime())) {
+        return res.status(400).json({ error: 'Invalid invoice date' });
+      }
+      const endOfToday = new Date();
+      endOfToday.setHours(23, 59, 59, 999);
+      if (d > endOfToday) {
+        return res.status(400).json({ error: 'Invoice date cannot be in the future' });
+      }
+      parsedInvoiceDate = d;
+    }
+
     // Atomic transaction: invoice + invoice_items + stock_transactions + stock updates
     const savedInvoice = await prisma.$transaction(async (tx) => {
       // 1. Verify customer
@@ -219,7 +233,7 @@ router.post('/', async (req, res) => {
       // 2. Determine invoiceNumber atomically
       const finalInvoiceNumber = customInvoiceNumber
         ? customInvoiceNumber.trim()
-        : await getNextInvoiceNumber(tx, invoiceDate ? new Date(invoiceDate) : new Date());
+        : await getNextInvoiceNumber(tx, parsedInvoiceDate);
 
       // 3. Process items, validate stock, and compute line items with Decimal
       const lineCalculations = [];
@@ -310,7 +324,7 @@ router.post('/', async (req, res) => {
       const invoice = await tx.invoice.create({
         data: {
           invoiceNumber: finalInvoiceNumber,
-          invoiceDate: invoiceDate ? new Date(invoiceDate) : new Date(),
+          invoiceDate: parsedInvoiceDate,
           customerId: customer.id,
           taxType: finalTaxType,
           taxableTotal: totals.taxableTotal,
@@ -332,7 +346,7 @@ router.post('/', async (req, res) => {
       });
 
       return invoice;
-    });
+    }, { maxWait: 15000, timeout: 20000 });
 
     res.status(201).json(savedInvoice);
   } catch (error) {
@@ -492,12 +506,100 @@ router.post('/:id/returns', async (req, res) => {
       }
 
       return salesReturn;
-    });
+    }, { maxWait: 15000, timeout: 20000 });
 
     res.status(201).json(savedReturn);
   } catch (error) {
     console.error('Error creating sales return:', error.message);
     res.status(400).json({ error: error.message || 'Failed to create sales return' });
+  }
+});
+
+// POST /invoices/:id/cancel - Cancel mistaken invoice (atomic stock restoration)
+router.post('/:id/cancel', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+
+    if (!reason || !reason.trim()) {
+      return res.status(400).json({ error: 'Cancellation reason is required' });
+    }
+
+    const cancelledInvoice = await prisma.$transaction(async (tx) => {
+      const invoice = await tx.invoice.findUnique({
+        where: { id },
+        include: {
+          items: true,
+          returns: { include: { items: true } },
+        },
+      });
+
+      if (!invoice) {
+        throw new Error('Invoice not found');
+      }
+
+      if (invoice.status === 'CANCELLED') {
+        throw new Error('Invoice is already cancelled');
+      }
+
+      // Block cancellation if invoice has any sales returns against it
+      if (invoice.returns && invoice.returns.length > 0) {
+        throw new Error('Cannot cancel invoice: sales returns have already been processed against this invoice');
+      }
+
+      const returnItemsCount = await tx.salesReturnItem.count({
+        where: {
+          invoiceItemId: { in: invoice.items.map((it) => it.id) },
+        },
+      });
+      if (returnItemsCount > 0) {
+        throw new Error('Cannot cancel invoice: sales returns have already been processed against this invoice');
+      }
+
+      // Restore stock per item and write a StockTransaction of type CANCELLATION.
+      // Note: Unlike decrements (purchases/sales), stock restoration is an additive increment,
+      // so there is no lower-bound 'insufficient stock' condition to guard against.
+      for (const item of invoice.items) {
+        await tx.product.update({
+          where: { id: item.productId },
+          data: {
+            currentStock: {
+              increment: item.qty,
+            },
+          },
+        });
+
+        await tx.stockTransaction.create({
+          data: {
+            productId: item.productId,
+            type: 'CANCELLATION',
+            quantity: item.qty, // positive = stock restored
+            reference: invoice.invoiceNumber,
+          },
+        });
+      }
+
+      // Mark invoice as CANCELLED with reason and timestamp
+      const updated = await tx.invoice.update({
+        where: { id },
+        data: {
+          status: 'CANCELLED',
+          cancellationReason: reason.trim(),
+          cancelledAt: new Date(),
+        },
+        include: {
+          customer: true,
+          items: true,
+        },
+      });
+
+      return updated;
+    }, { maxWait: 15000, timeout: 20000 });
+
+    res.json(cancelledInvoice);
+  } catch (error) {
+    console.error('Error cancelling invoice:', error.message);
+    res.status(400).json({ error: error.message || 'Failed to cancel invoice' });
   }
 });
 

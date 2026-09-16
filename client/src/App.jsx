@@ -192,7 +192,7 @@ export const parseSafeJson = async (res) => {
   }
 };
 
-export const getApiUrl = (endpoint) => {
+const getApiUrl = (endpoint) => {
   if (!endpoint) return '';
   if (endpoint.startsWith('http://') || endpoint.startsWith('https://') || endpoint.startsWith('data:')) {
     return endpoint;
@@ -201,7 +201,7 @@ export const getApiUrl = (endpoint) => {
   return `${API_BASE_URL}${cleanEndpoint}`;
 };
 
-export const getLogoSrc = (logoUrl) => {
+const getLogoSrc = (logoUrl) => {
   if (!logoUrl) return '/assets/logo/prathna-logo.png';
   if (logoUrl.startsWith('data:') || logoUrl.startsWith('blob:') || logoUrl.startsWith('http://') || logoUrl.startsWith('https://')) {
     return logoUrl;
@@ -211,6 +211,48 @@ export const getLogoSrc = (logoUrl) => {
   }
   return getApiUrl(logoUrl);
 };
+
+const CACHE_KEYS = {
+  PRODUCTS: "prathna_cache_products",
+  CUSTOMERS: "prathna_cache_customers",
+  RECENT_CUSTOMERS: "prathna_cache_recent_customers",
+  SUPPLIERS: "prathna_cache_suppliers",
+  PURCHASES: "prathna_cache_purchases",
+  INVOICES: "prathna_cache_invoices",
+  DASHBOARD_SUMMARY: "prathna_cache_dashboard_summary",
+  SALES_TREND: "prathna_cache_sales_trend",
+};
+
+function getInitialCachedState(key, fallback) {
+  try {
+    const savedToken = localStorage.getItem("prathna_token");
+    const sessionDate = localStorage.getItem("prathna_session_date");
+    const today = getTodayDateString();
+    if (!savedToken || sessionDate !== today) {
+      return fallback;
+    }
+    const cached = localStorage.getItem(key);
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (parsed !== null && parsed !== undefined) {
+        return parsed;
+      }
+    }
+  } catch (e) {
+    console.warn(`Failed reading cache for ${key}:`, e);
+  }
+  return fallback;
+}
+
+function setCachedState(key, value) {
+  try {
+    if (value !== null && value !== undefined) {
+      localStorage.setItem(key, JSON.stringify(value));
+    }
+  } catch (e) {
+    console.warn(`Failed writing cache for ${key}:`, e);
+  }
+}
 
 export default function App() {
   // Authentication State with 1-Login-Per-Day Session Logic
@@ -274,17 +316,31 @@ export default function App() {
   const [activeTab, setActiveTab] = useState(() => getInitialNavigation().tab);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  // Core collections
-  const [products, setProducts] = useState([]);
-  const [customers, setCustomers] = useState([]);
-  const [suppliers, setSuppliers] = useState([]);
-  const [purchases, setPurchases] = useState([]);
-  const [invoices, setInvoices] = useState([]);
-  const [dashboardSummary, setDashboardSummary] = useState(null);
+  // Core collections initialized with cached snapshots for instant 0ms rendering
+  const [products, setProducts] = useState(() =>
+    getInitialCachedState(CACHE_KEYS.PRODUCTS, []),
+  );
+  const [customers, setCustomers] = useState(() =>
+    getInitialCachedState(CACHE_KEYS.CUSTOMERS, []),
+  );
+  const [suppliers, setSuppliers] = useState(() =>
+    getInitialCachedState(CACHE_KEYS.SUPPLIERS, []),
+  );
+  const [purchases, setPurchases] = useState(() =>
+    getInitialCachedState(CACHE_KEYS.PURCHASES, []),
+  );
+  const [invoices, setInvoices] = useState(() =>
+    getInitialCachedState(CACHE_KEYS.INVOICES, []),
+  );
+  const [dashboardSummary, setDashboardSummary] = useState(() =>
+    getInitialCachedState(CACHE_KEYS.DASHBOARD_SUMMARY, null),
+  );
   const [dashboardRange, setDashboardRange] = useState("today");
   const [dashboardCustomStart, setDashboardCustomStart] = useState("");
   const [dashboardCustomEnd, setDashboardCustomEnd] = useState("");
-  const [salesTrend, setSalesTrend] = useState(null);
+  const [salesTrend, setSalesTrend] = useState(() =>
+    getInitialCachedState(CACHE_KEYS.SALES_TREND, null),
+  );
   const [salesTrendRange, setSalesTrendRange] = useState("7d");
   const [loadingDashboard, setLoadingDashboard] = useState(false);
   const [hoveredTrendBar, setHoveredTrendBar] = useState(null);
@@ -380,7 +436,10 @@ export default function App() {
   const [savingQuickSupp, setSavingQuickSupp] = useState(false);
 
   // Form: Create Purchase
-  const [selectedSupplierId, setSelectedSupplierId] = useState("");
+  const [selectedSupplierId, setSelectedSupplierId] = useState(() => {
+    const cachedSupps = getInitialCachedState(CACHE_KEYS.SUPPLIERS, []);
+    return cachedSupps.length > 0 ? cachedSupps[0].id : "";
+  });
   const [purchaseRefNumber, setPurchaseRefNumber] = useState("");
   const [purchaseDate, setPurchaseDate] = useState(
     new Date().toISOString().split("T")[0],
@@ -392,8 +451,16 @@ export default function App() {
   const [creatingPurchase, setCreatingPurchase] = useState(false);
 
   // Form: Create Invoice
-  const [selectedCustomerId, setSelectedCustomerId] = useState("");
-  const [recentCustomers, setRecentCustomers] = useState([]);
+  const [selectedCustomerId, setSelectedCustomerId] = useState(() => {
+    const cachedCusts = getInitialCachedState(CACHE_KEYS.CUSTOMERS, []);
+    return cachedCusts.length > 0 ? cachedCusts[0].id : "";
+  });
+  const [invoiceDate, setInvoiceDate] = useState(
+    new Date().toISOString().split("T")[0],
+  );
+  const [recentCustomers, setRecentCustomers] = useState(() =>
+    getInitialCachedState(CACHE_KEYS.RECENT_CUSTOMERS, []),
+  );
   const [customerSearchQuery, setCustomerSearchQuery] = useState("");
   const [invoiceTaxType, setInvoiceTaxType] = useState("INTRASTATE");
   const [taxTypeManualOverride, setTaxTypeManualOverride] = useState(false);
@@ -404,6 +471,15 @@ export default function App() {
   const [creatingInvoice, setCreatingInvoice] = useState(false);
   const [savedInvoiceJSON, setSavedInvoiceJSON] = useState(null);
   const [invoicePaymentMethod, setInvoicePaymentMethod] = useState("CASH");
+
+  // Cancellation Modals State
+  const [cancelInvoiceModal, setCancelInvoiceModal] = useState(null);
+  const [cancelInvoiceReason, setCancelInvoiceReason] = useState("");
+  const [cancellingInvoice, setCancellingInvoice] = useState(false);
+
+  const [cancelPurchaseModal, setCancelPurchaseModal] = useState(null);
+  const [cancelPurchaseReason, setCancelPurchaseReason] = useState("");
+  const [cancellingPurchase, setCancellingPurchase] = useState(false);
 
   // Compute Top Selling Products (Max 4 for quick selection)
   const topSellingProducts = useMemo(() => {
@@ -450,6 +526,9 @@ export default function App() {
   const [searchedInvoices, setSearchedInvoices] = useState(null);
   const [searchingInvoices, setSearchingInvoices] = useState(false);
   const [expandedInvoiceId, setExpandedInvoiceId] = useState(null);
+  const [expandedPurchaseId, setExpandedPurchaseId] = useState(null);
+  const [expandedReportPurchaseId, setExpandedReportPurchaseId] = useState(null);
+  const [invoiceHistoryStatusFilter, setInvoiceHistoryStatusFilter] = useState("all");
 
   // Sales Return Modal State
   const [returnModalInvoice, setReturnModalInvoice] = useState(null);
@@ -616,6 +695,7 @@ export default function App() {
     localStorage.removeItem("prathna_active_tab");
     localStorage.removeItem("prathna_report_sub_tab");
     localStorage.removeItem("prathna_last_email");
+    Object.values(CACHE_KEYS).forEach((k) => localStorage.removeItem(k));
     if (window.location.hash) {
       window.history.replaceState(
         null,
@@ -698,83 +778,111 @@ export default function App() {
     }
   };
 
-  // Load initial data and dashboard summary
+  // Load initial data and dashboard summary with high-speed phased loading & caching
   const loadData = async () => {
     if (!token) return;
-    setLoadingInitial(true);
+    if (!dashboardSummary) {
+      setLoadingInitial(true);
+    }
     setDataLoadError("");
+
+    // Phase 1: High-Priority Operational Data (Fast path: settings, dashboard, products, customers)
+    const fetchPhase1 = async () => {
+      try {
+        const [pRes, cRes, setRes, dashRes] = await Promise.all([
+          authFetch("/products"),
+          authFetch("/customers"),
+          authFetch("/settings"),
+          authFetch("/dashboard/summary"),
+        ]);
+
+        const [pData, cData, setData, dashData] = await Promise.all([
+          pRes.json(),
+          cRes.json(),
+          setRes.json(),
+          dashRes.json(),
+        ]);
+
+        if (Array.isArray(pData)) {
+          setProducts(pData);
+          setCachedState(CACHE_KEYS.PRODUCTS, pData);
+        }
+        if (Array.isArray(cData)) {
+          setCustomers(cData);
+          setCachedState(CACHE_KEYS.CUSTOMERS, cData);
+          if (cData.length > 0 && !selectedCustomerId) {
+            setSelectedCustomerId(cData[0].id);
+          }
+        }
+        if (setData && !setData.error) {
+          setCompanySettings(setData);
+          try {
+            localStorage.setItem("prathna_company_settings", JSON.stringify(setData));
+          } catch {}
+        }
+        if (dashData && !dashData.error) {
+          setDashboardSummary(dashData);
+          setCachedState(CACHE_KEYS.DASHBOARD_SUMMARY, dashData);
+        } else {
+          setDataLoadError("Couldn't load dashboard summary — try refreshing");
+        }
+      } catch (err) {
+        console.error("Phase 1 load error:", err);
+        throw err;
+      } finally {
+        setLoadingInitial(false);
+      }
+    };
+
+    // Phase 2: Auxiliary & Historical Data (Background path: suppliers, purchases, invoices, trend, recent)
+    const fetchPhase2 = async () => {
+      try {
+        const [sRes, puRes, recRes, invRes, trendRes] = await Promise.all([
+          authFetch("/suppliers").catch(() => null),
+          authFetch("/purchases").catch(() => null),
+          authFetch("/customers/recent").catch(() => null),
+          authFetch("/invoices").catch(() => null),
+          authFetch("/dashboard/sales-trend?range=7d").catch(() => null),
+        ]);
+
+        const [sData, puData, recData, invData, trendData] = await Promise.all([
+          sRes ? sRes.json().catch(() => []) : [],
+          puRes ? puRes.json().catch(() => []) : [],
+          recRes ? recRes.json().catch(() => []) : [],
+          invRes ? invRes.json().catch(() => []) : [],
+          trendRes ? trendRes.json().catch(() => null) : null,
+        ]);
+
+        if (Array.isArray(sData)) {
+          setSuppliers(sData);
+          setCachedState(CACHE_KEYS.SUPPLIERS, sData);
+          if (sData.length > 0 && !selectedSupplierId) {
+            setSelectedSupplierId(sData[0].id);
+          }
+        }
+        if (Array.isArray(puData)) {
+          setPurchases(puData);
+          setCachedState(CACHE_KEYS.PURCHASES, puData);
+        }
+        if (Array.isArray(recData)) {
+          setRecentCustomers(recData);
+          setCachedState(CACHE_KEYS.RECENT_CUSTOMERS, recData);
+        }
+        if (Array.isArray(invData)) {
+          setInvoices(invData);
+          setCachedState(CACHE_KEYS.INVOICES, invData);
+        }
+        if (trendData && !trendData.error) {
+          setSalesTrend(trendData);
+          setCachedState(CACHE_KEYS.SALES_TREND, trendData);
+        }
+      } catch (err) {
+        console.warn("Phase 2 load error:", err);
+      }
+    };
+
     try {
-      const [
-        pRes,
-        cRes,
-        sRes,
-        puRes,
-        setRes,
-        dashRes,
-        recRes,
-        invRes,
-        trendRes,
-      ] = await Promise.all([
-        authFetch("/products"),
-        authFetch("/customers"),
-        authFetch("/suppliers"),
-        authFetch("/purchases"),
-        authFetch("/settings"),
-        authFetch("/dashboard/summary"),
-        authFetch("/customers/recent").catch(() => null),
-        authFetch("/invoices").catch(() => null),
-        authFetch("/dashboard/sales-trend?range=7d").catch(() => null),
-      ]);
-
-      const [
-        pData,
-        cData,
-        sData,
-        puData,
-        setData,
-        dashData,
-        recData,
-        invData,
-        trendData,
-      ] = await Promise.all([
-        pRes.json(),
-        cRes.json(),
-        sRes.json(),
-        puRes.json(),
-        setRes.json(),
-        dashRes.json(),
-        recRes ? recRes.json().catch(() => []) : [],
-        invRes ? invRes.json().catch(() => []) : [],
-        trendRes ? trendRes.json().catch(() => null) : null,
-      ]);
-
-      setProducts(Array.isArray(pData) ? pData : []);
-      setCustomers(Array.isArray(cData) ? cData : []);
-      setRecentCustomers(Array.isArray(recData) ? recData : []);
-      setSuppliers(Array.isArray(sData) ? sData : []);
-      setPurchases(Array.isArray(puData) ? puData : []);
-      setInvoices(Array.isArray(invData) ? invData : []);
-      if (setData && !setData.error) {
-        setCompanySettings(setData);
-        try {
-          localStorage.setItem("prathna_company_settings", JSON.stringify(setData));
-        } catch {}
-      }
-      if (dashData && !dashData.error) {
-        setDashboardSummary(dashData);
-      } else {
-        setDataLoadError("Couldn't load dashboard summary — try refreshing");
-      }
-      if (trendData && !trendData.error) {
-        setSalesTrend(trendData);
-      }
-
-      if (Array.isArray(cData) && cData.length > 0 && !selectedCustomerId) {
-        setSelectedCustomerId(cData[0].id);
-      }
-      if (Array.isArray(sData) && sData.length > 0 && !selectedSupplierId) {
-        setSelectedSupplierId(sData[0].id);
-      }
+      await Promise.allSettled([fetchPhase1(), fetchPhase2()]);
     } catch (err) {
       console.error("Failed to load initial data:", err);
       if (err.message !== "Session expired") {
@@ -815,8 +923,18 @@ export default function App() {
         dashRes.json(),
         trendRes.json(),
       ]);
-      if (dashData && !dashData.error) setDashboardSummary(dashData);
-      if (trendData && !trendData.error) setSalesTrend(trendData);
+      if (dashData && !dashData.error) {
+        setDashboardSummary(dashData);
+        if (range === "today") {
+          setCachedState(CACHE_KEYS.DASHBOARD_SUMMARY, dashData);
+        }
+      }
+      if (trendData && !trendData.error) {
+        setSalesTrend(trendData);
+        if (trendParam === "7d") {
+          setCachedState(CACHE_KEYS.SALES_TREND, trendData);
+        }
+      }
     } catch (err) {
       console.warn("Failed to reload dashboard for range:", err);
       showToast("Could not update date range data", "error");
@@ -831,7 +949,12 @@ export default function App() {
     try {
       const res = await authFetch(`/dashboard/sales-trend?range=${range}`);
       const data = await res.json();
-      if (data && !data.error) setSalesTrend(data);
+      if (data && !data.error) {
+        setSalesTrend(data);
+        if (range === "7d") {
+          setCachedState(CACHE_KEYS.SALES_TREND, data);
+        }
+      }
     } catch (err) {
       console.warn("Failed to update sales trend:", err);
     }
@@ -1360,11 +1483,53 @@ export default function App() {
       );
       setPurchaseItems([]);
       setPurchaseRefNumber("");
+      setPurchaseDate(new Date().toISOString().split("T")[0]);
       await loadData();
     } catch (err) {
       showToast(err.message, "error");
     } finally {
       setCreatingPurchase(false);
+    }
+  };
+
+  const openCancelPurchaseModal = (purchase) => {
+    setCancelPurchaseModal(purchase);
+    setCancelPurchaseReason("");
+  };
+
+  const handleCancelPurchase = async (e) => {
+    e.preventDefault();
+    if (!cancelPurchaseModal) return;
+    if (!cancelPurchaseReason.trim()) {
+      showToast("Please enter a cancellation reason", "error");
+      return;
+    }
+
+    setCancellingPurchase(true);
+    try {
+      const res = await authFetch(`/purchases/${cancelPurchaseModal.id}/cancel`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: cancelPurchaseReason.trim() }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to cancel purchase");
+
+      showToast(
+        `Purchase "${data.referenceNumber}" cancelled and stock reversed!`,
+        "success",
+      );
+      setCancelPurchaseModal(null);
+      setCancelPurchaseReason("");
+      await loadData();
+      if (activeTab === "reports") {
+        loadReport();
+      }
+    } catch (err) {
+      showToast(err.message, "error");
+    } finally {
+      setCancellingPurchase(false);
     }
   };
 
@@ -1608,6 +1773,7 @@ export default function App() {
       const payload = {
         customerId: selectedCustomerId,
         taxType: invoiceTaxType,
+        invoiceDate,
         paymentStatus: invoicePaymentMethod === "CREDIT" ? "UNPAID" : "PAID",
         paymentMethod: invoicePaymentMethod,
         items: invoiceItems.map((item) => ({
@@ -1640,12 +1806,54 @@ export default function App() {
       setSavedInvoiceJSON(data);
       setInvoices((prev) => [data, ...prev]);
       setInvoiceItems([]);
+      setInvoiceDate(new Date().toISOString().split("T")[0]);
       setInvoicePaymentMethod("CASH");
       await loadData();
     } catch (err) {
       showToast(err.message, "error");
     } finally {
       setCreatingInvoice(false);
+    }
+  };
+
+  const openCancelInvoiceModal = (invoice) => {
+    setCancelInvoiceModal(invoice);
+    setCancelInvoiceReason("");
+  };
+
+  const handleCancelInvoice = async (e) => {
+    e.preventDefault();
+    if (!cancelInvoiceModal) return;
+    if (!cancelInvoiceReason.trim()) {
+      showToast("Please enter a cancellation reason", "error");
+      return;
+    }
+
+    setCancellingInvoice(true);
+    try {
+      const res = await authFetch(`/invoices/${cancelInvoiceModal.id}/cancel`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: cancelInvoiceReason.trim() }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to cancel invoice");
+
+      showToast(
+        `Invoice ${data.invoiceNumber} cancelled and stock restored!`,
+        "success",
+      );
+      setCancelInvoiceModal(null);
+      setCancelInvoiceReason("");
+      await loadData();
+      if (activeTab === "reports") {
+        loadReport();
+      }
+    } catch (err) {
+      showToast(err.message, "error");
+    } finally {
+      setCancellingInvoice(false);
     }
   };
 
@@ -2377,7 +2585,7 @@ export default function App() {
             )}
 
             {/* Loading State */}
-            {(loadingInitial || loadingDashboard) && !dataLoadError && (
+            {!dashboardSummary && (loadingInitial || loadingDashboard) && !dataLoadError && (
               <div className="loading-state" style={{ padding: "30px" }}>
                 <RefreshCw
                   size={26}
@@ -2405,7 +2613,7 @@ export default function App() {
             )}
 
             {/* 3 Top Operational KPI Cards */}
-            {dashboardSummary && !loadingInitial && (
+            {dashboardSummary && (
               <>
                 <div className="dashboard-kpi-grid">
                   {/* Card 1: Sales for Selected Period */}
@@ -2996,9 +3204,18 @@ export default function App() {
                         </thead>
                         <tbody>
                           {dashboardSummary.recentInvoices.map((inv) => (
-                            <tr key={inv.id}>
+                            <tr key={inv.id} style={inv.status === "CANCELLED" ? { opacity: 0.7 } : undefined}>
                               <td style={{ fontWeight: 600 }}>
                                 {inv.invoiceNumber}
+                                {inv.status === "CANCELLED" && (
+                                  <span
+                                    className="badge badge-danger"
+                                    style={{ marginLeft: "6px" }}
+                                    title={inv.cancellationReason ? `Reason: ${inv.cancellationReason}` : "Cancelled"}
+                                  >
+                                    CANCELLED
+                                  </span>
+                                )}
                               </td>
                               <td>
                                 {new Date(
@@ -3007,14 +3224,22 @@ export default function App() {
                               </td>
                               <td>{inv.customerName || "Walk-in Customer"}</td>
                               <td
-                                style={{ textAlign: "right", fontWeight: 600 }}
+                                style={{
+                                  textAlign: "right",
+                                  fontWeight: 600,
+                                  textDecoration: inv.status === "CANCELLED" ? "line-through" : "none",
+                                }}
                               >
                                 ₹{Number(inv.billAmount).toFixed(2)}
                               </td>
                               <td>
-                                <span className="badge badge-success">
-                                  {inv.paymentStatus || "PAID"}
-                                </span>
+                                {inv.status === "CANCELLED" ? (
+                                  <span className="badge badge-danger">CANCELLED</span>
+                                ) : (
+                                  <span className="badge badge-success">
+                                    {inv.paymentStatus || "PAID"}
+                                  </span>
+                                )}
                               </td>
                               <td style={{ textAlign: "right" }}>
                                 <div
@@ -3032,13 +3257,15 @@ export default function App() {
                                   >
                                     <Download size={13} /> PDF
                                   </button>
-                                  <button
-                                    className="btn btn-secondary btn-sm"
-                                    onClick={() => openReturnModal(inv)}
-                                    title="Return items from this invoice"
-                                  >
-                                    <RotateCcw size={13} /> Return
-                                  </button>
+                                  {inv.status !== "CANCELLED" && (
+                                    <button
+                                      className="btn btn-secondary btn-sm"
+                                      onClick={() => openReturnModal(inv)}
+                                      title="Return items from this invoice"
+                                    >
+                                      <RotateCcw size={13} /> Return
+                                    </button>
+                                  )}
                                 </div>
                               </td>
                             </tr>
@@ -3616,6 +3843,65 @@ export default function App() {
                         })()}
                       </div>
 
+                      {/* Invoice Date Selection */}
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          flexWrap: "wrap",
+                          gap: "12px",
+                          marginBottom: "16px",
+                          padding: "12px 14px",
+                          background: "var(--bg-canvas)",
+                          borderRadius: "var(--radius)",
+                          border: "1px solid var(--border)",
+                        }}
+                      >
+                        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                          <div
+                            style={{
+                              width: "32px",
+                              height: "32px",
+                              borderRadius: "6px",
+                              background: "var(--bg-surface)",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              border: "1px solid var(--border)",
+                              color: "var(--primary)",
+                            }}
+                          >
+                            <Calendar size={16} />
+                          </div>
+                          <div>
+                            <div style={{ fontSize: "0.875rem", fontWeight: 600, color: "var(--text-primary)" }}>
+                              Invoice Date
+                            </div>
+                            <div style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>
+                              Editable creation date (up to today, future dates disabled)
+                            </div>
+                          </div>
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          <input
+                            type="date"
+                            className="form-input"
+                            style={{
+                              width: "auto",
+                              minHeight: "36px",
+                              padding: "6px 12px",
+                              fontSize: "0.875rem",
+                              fontWeight: 500,
+                            }}
+                            value={invoiceDate}
+                            max={new Date().toISOString().split("T")[0]}
+                            onChange={(e) => setInvoiceDate(e.target.value)}
+                            required
+                          />
+                        </div>
+                      </div>
+
                       {/* Step 2: Add Product Line Item */}
                       <div
                         style={{
@@ -4135,7 +4421,7 @@ export default function App() {
                           className="btn btn-secondary btn-sm"
                           onClick={() => setInvoiceSubTab("history")}
                         >
-                          View All Past Invoices ({invoices.length}) &rarr;
+                          View All Past Invoices ({invoices.filter((i) => i.status !== "CANCELLED").length} active) &rarr;
                         </button>
                       </div>
 
@@ -4189,7 +4475,12 @@ export default function App() {
                         </button>
                       </form>
 
-                      {displayedInvoices.length > 0 ? (
+                      {(() => {
+                        const quickInvoices = (!invoiceSearchQuery.trim() && searchedInvoices === null)
+                          ? displayedInvoices.filter((inv) => inv.status !== "CANCELLED")
+                          : displayedInvoices;
+
+                        return quickInvoices.length > 0 ? (
                         <div className="table-container">
                           <table className="data-table">
                             <thead>
@@ -4203,11 +4494,20 @@ export default function App() {
                               </tr>
                             </thead>
                             <tbody>
-                              {displayedInvoices.slice(0, 5).map((inv) => (
+                              {quickInvoices.slice(0, 5).map((inv) => (
                                 <React.Fragment key={inv.id}>
-                                  <tr>
+                                  <tr style={inv.status === "CANCELLED" ? { opacity: 0.75 } : undefined}>
                                     <td style={{ fontWeight: 600 }}>
                                       {inv.invoiceNumber}
+                                      {inv.status === "CANCELLED" && (
+                                        <span
+                                          className="badge badge-danger"
+                                          style={{ marginLeft: "6px" }}
+                                          title={inv.cancellationReason ? `Reason: ${inv.cancellationReason}` : "Cancelled"}
+                                        >
+                                          CANCELLED
+                                        </span>
+                                      )}
                                     </td>
                                     <td>
                                       {new Date(
@@ -4234,6 +4534,7 @@ export default function App() {
                                       style={{
                                         textAlign: "right",
                                         fontWeight: 600,
+                                        textDecoration: inv.status === "CANCELLED" ? "line-through" : "none",
                                       }}
                                     >
                                       ₹{Number(inv.billAmount).toFixed(2)}
@@ -4279,13 +4580,25 @@ export default function App() {
                                         >
                                           <Download size={13} /> PDF
                                         </button>
-                                        <button
-                                          className="btn btn-secondary btn-sm"
-                                          onClick={() => openReturnModal(inv)}
-                                          title="Return items"
-                                        >
-                                          <RotateCcw size={13} /> Return
-                                        </button>
+                                        {inv.status === "CANCELLED" ? (
+                                          <button
+                                            type="button"
+                                            className="btn btn-secondary btn-sm"
+                                            disabled
+                                            style={{ fontSize: "0.75rem", opacity: 0.6 }}
+                                            title={`Cancelled: ${inv.cancellationReason || "No reason given"}`}
+                                          >
+                                            <X size={13} /> Cancelled
+                                          </button>
+                                        ) : (
+                                          <button
+                                            className="btn btn-secondary btn-sm"
+                                            onClick={() => openReturnModal(inv)}
+                                            title="Return items"
+                                          >
+                                            <RotateCcw size={13} /> Return
+                                          </button>
+                                        )}
                                       </div>
                                     </td>
                                   </tr>
@@ -4383,16 +4696,26 @@ export default function App() {
                           <div className="empty-state-title">
                             {invoiceSearchQuery
                               ? `No invoices found matching "${invoiceSearchQuery}"`
-                              : "No past invoices found"}
+                              : "No active past invoices found"}
                           </div>
                         </div>
-                      )}
+                      );
+                    })()}
                     </div>
                   </div>
                 )}
 
                 {/* Sub-tab 2: Past Invoices Directory & Full Search */}
-                {invoiceSubTab === "history" && (
+                {invoiceSubTab === "history" && (() => {
+                  const activeCount = displayedInvoices.filter((i) => i.status !== "CANCELLED").length;
+                  const cancelledCount = displayedInvoices.filter((i) => i.status === "CANCELLED").length;
+                  const filteredHistoryInvoices = displayedInvoices.filter((inv) => {
+                    if (invoiceHistoryStatusFilter === "active") return inv.status !== "CANCELLED";
+                    if (invoiceHistoryStatusFilter === "cancelled") return inv.status === "CANCELLED";
+                    return true;
+                  });
+
+                  return (
                   <div>
                     <div className="card" style={{ marginBottom: "20px" }}>
                       <div
@@ -4489,11 +4812,41 @@ export default function App() {
                           justifyContent: "space-between",
                           alignItems: "center",
                           marginBottom: "16px",
+                          flexWrap: "wrap",
+                          gap: "10px",
                         }}
                       >
-                        <h2 style={{ fontSize: "1.125rem", fontWeight: 600 }}>
-                          Past Invoices List
-                        </h2>
+                        <div>
+                          <h2 style={{ fontSize: "1.125rem", fontWeight: 600 }}>
+                            Past Invoices List
+                          </h2>
+                          <div style={{ display: "flex", gap: "8px", marginTop: "8px", flexWrap: "wrap" }}>
+                            <button
+                              type="button"
+                              className={`btn btn-sm ${invoiceHistoryStatusFilter === "all" ? "btn-primary" : "btn-secondary"}`}
+                              onClick={() => setInvoiceHistoryStatusFilter("all")}
+                              style={{ fontSize: "0.75rem", padding: "3px 10px" }}
+                            >
+                              All Invoices ({displayedInvoices.length})
+                            </button>
+                            <button
+                              type="button"
+                              className={`btn btn-sm ${invoiceHistoryStatusFilter === "active" ? "btn-primary" : "btn-secondary"}`}
+                              onClick={() => setInvoiceHistoryStatusFilter("active")}
+                              style={{ fontSize: "0.75rem", padding: "3px 10px" }}
+                            >
+                              Active ({activeCount})
+                            </button>
+                            <button
+                              type="button"
+                              className={`btn btn-sm ${invoiceHistoryStatusFilter === "cancelled" ? "btn-primary" : "btn-secondary"}`}
+                              onClick={() => setInvoiceHistoryStatusFilter("cancelled")}
+                              style={{ fontSize: "0.75rem", padding: "3px 10px" }}
+                            >
+                              Cancelled ({cancelledCount})
+                            </button>
+                          </div>
+                        </div>
                         <button
                           className="btn btn-primary btn-sm"
                           onClick={() => setInvoiceSubTab("create")}
@@ -4502,45 +4855,55 @@ export default function App() {
                         </button>
                       </div>
 
-                      {displayedInvoices.length > 0 ? (
+                      {filteredHistoryInvoices.length > 0 ? (
                         <div className="table-container">
                           <table className="data-table">
                             <thead>
                               <tr>
-                                <th>Invoice No</th>
-                                <th>Date</th>
-                                <th>Customer Details</th>
-                                <th>Tax Treatment</th>
-                                <th style={{ textAlign: "right" }}>
+                                <th style={{ whiteSpace: "nowrap" }}>Invoice No</th>
+                                <th style={{ whiteSpace: "nowrap" }}>Date</th>
+                                <th style={{ minWidth: "160px" }}>Customer Details</th>
+                                <th style={{ whiteSpace: "nowrap" }}>Tax Treatment</th>
+                                <th style={{ textAlign: "right", whiteSpace: "nowrap" }}>
                                   Total Amount
                                 </th>
-                                <th>Status</th>
-                                <th style={{ textAlign: "center" }}>Details</th>
-                                <th style={{ textAlign: "right" }}>Actions</th>
+                                <th style={{ whiteSpace: "nowrap" }}>Status</th>
+                                <th style={{ textAlign: "center", whiteSpace: "nowrap" }}>Details</th>
+                                <th style={{ textAlign: "right", whiteSpace: "nowrap" }}>Actions</th>
                               </tr>
                             </thead>
                             <tbody>
-                              {displayedInvoices.map((inv) => {
+                              {filteredHistoryInvoices.map((inv) => {
                                 const isExpanded = expandedInvoiceId === inv.id;
                                 const isInterstate =
                                   inv.taxType === "INTERSTATE";
                                 return (
                                   <React.Fragment key={inv.id}>
-                                    <tr>
+                                    <tr style={inv.status === "CANCELLED" ? { opacity: 0.75 } : undefined}>
                                       <td
                                         style={{
                                           fontWeight: 700,
                                           color: "var(--primary)",
+                                          whiteSpace: "nowrap",
                                         }}
                                       >
                                         {inv.invoiceNumber}
+                                        {inv.status === "CANCELLED" && (
+                                          <span
+                                            className="badge badge-danger"
+                                            style={{ marginLeft: "6px" }}
+                                            title={inv.cancellationReason ? `Reason: ${inv.cancellationReason}` : "Cancelled"}
+                                          >
+                                            CANCELLED
+                                          </span>
+                                        )}
                                       </td>
-                                      <td>
+                                      <td style={{ whiteSpace: "nowrap" }}>
                                         {new Date(
                                           inv.invoiceDate || inv.createdAt,
                                         ).toLocaleDateString("en-IN")}
                                       </td>
-                                      <td>
+                                      <td style={{ minWidth: "160px" }}>
                                         <div style={{ fontWeight: 600 }}>
                                           {inv.customer?.name ||
                                             "Walk-in Customer"}
@@ -4567,7 +4930,7 @@ export default function App() {
                                           </div>
                                         )}
                                       </td>
-                                      <td>
+                                      <td style={{ whiteSpace: "nowrap" }}>
                                         <span
                                           className={`badge ${isInterstate ? "badge-warning" : "badge-neutral"}`}
                                         >
@@ -4581,14 +4944,25 @@ export default function App() {
                                           textAlign: "right",
                                           fontWeight: 700,
                                           fontSize: "0.9375rem",
+                                          whiteSpace: "nowrap",
+                                          textDecoration: inv.status === "CANCELLED" ? "line-through" : "none",
                                         }}
                                       >
                                         ₹{Number(inv.billAmount).toFixed(2)}
                                       </td>
-                                      <td>
-                                        <span className="badge badge-success">
-                                          {inv.paymentStatus || "PAID"}
-                                        </span>
+                                      <td style={{ whiteSpace: "nowrap" }}>
+                                        {inv.status === "CANCELLED" ? (
+                                          <span
+                                            className="badge badge-danger"
+                                            title={inv.cancellationReason ? `Reason: ${inv.cancellationReason}` : "Cancelled"}
+                                          >
+                                            CANCELLED
+                                          </span>
+                                        ) : (
+                                          <span className="badge badge-success">
+                                            {inv.paymentStatus || "PAID"}
+                                          </span>
+                                        )}
                                         {inv.returns &&
                                           inv.returns.length > 0 && (
                                             <span
@@ -4602,7 +4976,7 @@ export default function App() {
                                             </span>
                                           )}
                                       </td>
-                                      <td style={{ textAlign: "center" }}>
+                                      <td style={{ textAlign: "center", whiteSpace: "nowrap" }}>
                                         <button
                                           type="button"
                                           className="btn btn-secondary btn-sm"
@@ -4622,7 +4996,7 @@ export default function App() {
                                             : `${inv.items?.length || 0} items`}
                                         </button>
                                       </td>
-                                      <td style={{ textAlign: "right" }}>
+                                      <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
                                         <div
                                           style={{
                                             display: "inline-flex",
@@ -4667,13 +5041,40 @@ export default function App() {
                                           >
                                             <Download size={13} /> PDF
                                           </button>
-                                          <button
-                                            className="btn btn-secondary btn-sm"
-                                            onClick={() => openReturnModal(inv)}
-                                            title="Return items from this invoice"
-                                          >
-                                            <RotateCcw size={13} /> Return
-                                          </button>
+                                          {inv.status === "CANCELLED" ? (
+                                            <button
+                                              type="button"
+                                              className="btn btn-secondary btn-sm"
+                                              disabled
+                                              style={{ fontSize: "0.75rem", opacity: 0.6 }}
+                                              title={`Cancelled: ${inv.cancellationReason || "No reason given"}`}
+                                            >
+                                              <X size={13} /> Cancelled
+                                            </button>
+                                          ) : (
+                                            <>
+                                              <button
+                                                className="btn btn-secondary btn-sm"
+                                                onClick={() => openReturnModal(inv)}
+                                                title="Return items from this invoice"
+                                              >
+                                                <RotateCcw size={13} /> Return
+                                              </button>
+                                              <button
+                                                className="btn btn-secondary btn-sm"
+                                                style={{ color: "var(--status-danger)" }}
+                                                disabled={inv.returns && inv.returns.length > 0}
+                                                onClick={() => openCancelInvoiceModal(inv)}
+                                                title={
+                                                  inv.returns && inv.returns.length > 0
+                                                    ? "Cannot cancel: Sales returns have already been processed"
+                                                    : "Cancel mistaken invoice & restore stock"
+                                                }
+                                              >
+                                                <X size={13} /> Cancel
+                                              </button>
+                                            </>
+                                          )}
                                         </div>
                                       </td>
                                     </tr>
@@ -4894,7 +5295,8 @@ export default function App() {
                       )}
                     </div>
                   </div>
-                )}
+                );
+              })()}
               </div>
             );
           })()}
@@ -5150,6 +5552,23 @@ export default function App() {
                     Invoice or challan number received from the vendor
                   </span>
                 </div>
+
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">
+                    Purchase Date <span style={{ color: "var(--status-danger)" }}>*</span>
+                  </label>
+                  <input
+                    type="date"
+                    className="form-input"
+                    value={purchaseDate}
+                    max={new Date().toISOString().split("T")[0]}
+                    onChange={(e) => setPurchaseDate(e.target.value)}
+                    required
+                  />
+                  <span className="form-hint">
+                    Date of purchase entry (cannot be future)
+                  </span>
+                </div>
               </div>
 
               {/* Add Purchase Line Item */}
@@ -5201,15 +5620,16 @@ export default function App() {
                       className="form-label"
                       style={{ fontSize: "0.8125rem" }}
                     >
-                      Quantity
+                      Qty
                     </label>
                     <input
                       type="number"
                       min="1"
+                      step="1"
                       className="form-input"
+                      placeholder="10"
                       value={purchaseQty}
                       onChange={(e) => setPurchaseQty(e.target.value)}
-                      placeholder="Quantity"
                     />
                   </div>
                   <div>
@@ -5221,20 +5641,24 @@ export default function App() {
                     </label>
                     <input
                       type="number"
+                      min="0"
                       step="0.01"
                       className="form-input"
+                      placeholder="Cost / unit"
                       value={purchaseRate}
                       onChange={(e) => setPurchaseRate(e.target.value)}
-                      placeholder="Unit purchase cost (₹)"
                     />
                   </div>
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={handleAddPurchaseItem}
-                  >
-                    <Plus size={16} /> Add Line
-                  </button>
+                  <div style={{ display: "flex", alignItems: "flex-end" }}>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      style={{ width: "100%", height: "42px" }}
+                      onClick={handleAddPurchaseItem}
+                    >
+                      <Plus size={16} /> Add
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -5243,38 +5667,52 @@ export default function App() {
                 <div style={{ fontWeight: 600, marginBottom: "8px" }}>
                   Items to Restock
                 </div>
+                {/* Line Items List */}
                 {purchaseItems.length > 0 ? (
-                  <div className="table-container">
+                  <div
+                    className="table-container"
+                    style={{ marginTop: "16px" }}
+                  >
                     <table className="data-table">
                       <thead>
                         <tr>
                           <th>Item</th>
-                          <th>HSN/SAC Code</th>
                           <th style={{ textAlign: "right" }}>Qty</th>
-                          <th style={{ textAlign: "right" }}>Purchase Rate</th>
+                          <th style={{ textAlign: "right" }}>Rate (₹)</th>
                           <th style={{ textAlign: "right" }}>GST Rate</th>
                           <th style={{ textAlign: "right" }}>Total</th>
                           <th style={{ textAlign: "center" }}>Remove</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {purchaseItems.map((it, idx) => (
+                        {purchaseItems.map((item, idx) => (
                           <tr key={idx}>
-                            <td style={{ fontWeight: 600 }}>{it.name}</td>
-                            <td>{it.hsnCode}</td>
-                            <td style={{ textAlign: "right" }}>{it.qty}</td>
+                            <td style={{ fontWeight: 600 }}>
+                              {item.productName}
+                            </td>
+                            <td style={{ textAlign: "right" }}>{item.qty}</td>
                             <td style={{ textAlign: "right" }}>
-                              ₹{Number(it.rate).toFixed(2)}
+                              ₹{Number(item.rate).toFixed(2)}
                             </td>
                             <td style={{ textAlign: "right" }}>
-                              {it.gstRate}%
+                              {item.gstRate}%
                             </td>
                             <td style={{ textAlign: "right", fontWeight: 600 }}>
-                              ₹{it.total.toFixed(2)}
+                              ₹
+                              {(
+                                Number(item.qty) *
+                                Number(item.rate) *
+                                (1 + Number(item.gstRate) / 100)
+                              ).toFixed(2)}
                             </td>
                             <td style={{ textAlign: "center" }}>
                               <button
-                                className="btn btn-danger btn-sm"
+                                type="button"
+                                className="btn btn-secondary btn-sm"
+                                style={{
+                                  padding: "4px 8px",
+                                  color: "var(--status-danger)",
+                                }}
                                 onClick={() =>
                                   setPurchaseItems(
                                     purchaseItems.filter((_, i) => i !== idx),
@@ -5333,28 +5771,244 @@ export default function App() {
                         <th>Date</th>
                         <th>Supplier</th>
                         <th>Bill Reference</th>
-                        <th>Items Count</th>
+                        <th style={{ textAlign: "center" }}>Details</th>
                         <th style={{ textAlign: "right" }}>Total Amount</th>
+                        <th>Status</th>
+                        <th style={{ textAlign: "right" }}>Actions</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {purchases.map((pu) => (
-                        <tr key={pu.id}>
-                          <td>
-                            {new Date(
-                              pu.purchaseDate || pu.createdAt,
-                            ).toLocaleDateString("en-IN")}
-                          </td>
-                          <td style={{ fontWeight: 600 }}>
-                            {pu.supplier?.name}
-                          </td>
-                          <td>{pu.referenceNumber}</td>
-                          <td>{pu.items?.length || 0} items</td>
-                          <td style={{ textAlign: "right", fontWeight: 600 }}>
-                            ₹{Number(pu.totalAmount).toFixed(2)}
-                          </td>
-                        </tr>
-                      ))}
+                      {purchases.map((pu) => {
+                        const isExpanded = expandedPurchaseId === pu.id;
+                        return (
+                          <React.Fragment key={pu.id}>
+                            <tr key={pu.id} style={pu.status === "CANCELLED" ? { opacity: 0.75 } : undefined}>
+                              <td>
+                                {new Date(
+                                  pu.purchaseDate || pu.createdAt,
+                                ).toLocaleDateString("en-IN")}
+                              </td>
+                              <td style={{ fontWeight: 600 }}>
+                                {pu.supplier?.name}
+                              </td>
+                              <td>
+                                {pu.referenceNumber}
+                                {pu.status === "CANCELLED" && (
+                                  <span
+                                    className="badge badge-danger"
+                                    style={{ marginLeft: "6px" }}
+                                    title={pu.cancellationReason ? `Reason: ${pu.cancellationReason}` : "Cancelled"}
+                                  >
+                                    CANCELLED
+                                  </span>
+                                )}
+                              </td>
+                              <td style={{ textAlign: "center" }}>
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary btn-sm"
+                                  onClick={() =>
+                                    setExpandedPurchaseId(
+                                      isExpanded ? null : pu.id,
+                                    )
+                                  }
+                                  style={{
+                                    fontSize: "0.75rem",
+                                    padding: "4px 10px",
+                                  }}
+                                >
+                                  <Eye size={13} />{" "}
+                                  {isExpanded
+                                    ? "Hide"
+                                    : `${pu.items?.length || 0} items`}
+                                </button>
+                              </td>
+                              <td
+                                style={{
+                                  textAlign: "right",
+                                  fontWeight: 600,
+                                  textDecoration: pu.status === "CANCELLED" ? "line-through" : "none",
+                                }}
+                              >
+                                ₹{Number(pu.totalAmount).toFixed(2)}
+                              </td>
+                              <td>
+                                {pu.status === "CANCELLED" ? (
+                                  <span
+                                    className="badge badge-danger"
+                                    title={pu.cancellationReason ? `Reason: ${pu.cancellationReason}` : "Cancelled"}
+                                  >
+                                    CANCELLED
+                                  </span>
+                                ) : (
+                                  <span className="badge badge-success">ACTIVE</span>
+                                )}
+                              </td>
+                              <td style={{ textAlign: "right" }}>
+                                {pu.status === "CANCELLED" ? (
+                                  <button
+                                    type="button"
+                                    className="btn btn-secondary btn-sm"
+                                    disabled
+                                    style={{ fontSize: "0.75rem", opacity: 0.6 }}
+                                    title={`Cancelled: ${pu.cancellationReason || "No reason given"}`}
+                                  >
+                                    <X size={13} /> Cancelled
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    className="btn btn-secondary btn-sm"
+                                    style={{ color: "var(--status-danger)" }}
+                                    onClick={() => openCancelPurchaseModal(pu)}
+                                    title="Cancel mistaken purchase & reverse stock"
+                                  >
+                                    <X size={13} /> Cancel
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                            {isExpanded && (
+                              <tr>
+                                <td
+                                  colSpan={7}
+                                  style={{
+                                    background: "var(--bg-canvas)",
+                                    padding: "16px 20px",
+                                    borderLeft:
+                                      "4px solid var(--primary)",
+                                  }}
+                                >
+                                  <div
+                                    style={{
+                                      display: "flex",
+                                      justifyContent: "space-between",
+                                      alignItems: "center",
+                                      marginBottom: "10px",
+                                    }}
+                                  >
+                                    <div
+                                      style={{
+                                        fontWeight: 600,
+                                        fontSize: "0.875rem",
+                                      }}
+                                    >
+                                      Line Items Breakdown for Ref #{pu.referenceNumber} (
+                                      {pu.items?.length || 0} items):
+                                    </div>
+                                    <div
+                                      style={{
+                                        fontSize: "0.8125rem",
+                                        color: "var(--text-secondary)",
+                                      }}
+                                    >
+                                      Total: ₹{Number(pu.totalAmount || 0).toFixed(2)}
+                                    </div>
+                                  </div>
+                                  <table
+                                    className="data-table"
+                                    style={{ fontSize: "0.8125rem" }}
+                                  >
+                                    <thead>
+                                      <tr>
+                                        <th>Item Description</th>
+                                        <th>HSN/SAC Code</th>
+                                        <th
+                                          style={{ textAlign: "right" }}
+                                        >
+                                          Quantity
+                                        </th>
+                                        <th
+                                          style={{ textAlign: "right" }}
+                                        >
+                                          Unit Rate
+                                        </th>
+                                        <th
+                                          style={{ textAlign: "right" }}
+                                        >
+                                          GST Rate
+                                        </th>
+                                        <th
+                                          style={{ textAlign: "right" }}
+                                        >
+                                          Total Amount
+                                        </th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {pu.items?.map((it) => (
+                                        <tr key={it.id}>
+                                          <td
+                                            style={{ fontWeight: 600 }}
+                                          >
+                                            {it.product?.name || "—"}
+                                          </td>
+                                          <td>
+                                            {it.product?.hsnCode || "-"}
+                                          </td>
+                                          <td
+                                            style={{
+                                              textAlign: "right",
+                                            }}
+                                          >
+                                            {Number(it.qty)}
+                                          </td>
+                                          <td
+                                            style={{
+                                              textAlign: "right",
+                                            }}
+                                          >
+                                            ₹
+                                            {Number(it.rate).toFixed(2)}
+                                          </td>
+                                          <td
+                                            style={{
+                                              textAlign: "right",
+                                            }}
+                                          >
+                                            {it.gstRate}%
+                                          </td>
+                                          <td
+                                            style={{
+                                              textAlign: "right",
+                                              fontWeight: 600,
+                                            }}
+                                          >
+                                            ₹
+                                            {Number(it.amount).toFixed(2)}
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                  {pu.notes && (
+                                    <div
+                                      style={{
+                                        marginTop: "10px",
+                                        fontSize: "0.8125rem",
+                                        color: "var(--text-secondary)",
+                                      }}
+                                    >
+                                      <strong>Notes:</strong> {pu.notes}
+                                    </div>
+                                  )}
+                                  {pu.status === "CANCELLED" && pu.cancellationReason && (
+                                    <div
+                                      style={{
+                                        marginTop: "10px",
+                                        fontSize: "0.8125rem",
+                                        color: "var(--status-danger)",
+                                      }}
+                                    >
+                                      <strong>Cancellation Reason:</strong> {pu.cancellationReason}
+                                    </div>
+                                  )}
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -6246,16 +6900,27 @@ export default function App() {
                           {salesReportData.invoices.map((inv) => {
                             const isInterstate = inv.taxType === "INTERSTATE";
                             return (
-                              <tr key={inv.id}>
+                              <tr key={inv.id} style={inv.status === "CANCELLED" ? { opacity: 0.75 } : undefined}>
                                 <td style={{ fontWeight: 600 }}>
                                   {inv.invoiceNumber}
+                                  {inv.status === "CANCELLED" && (
+                                    <span
+                                      className="badge badge-danger"
+                                      style={{ marginLeft: "6px" }}
+                                      title={inv.cancellationReason ? `Reason: ${inv.cancellationReason}` : "Cancelled"}
+                                    >
+                                      CANCELLED
+                                    </span>
+                                  )}
                                 </td>
                                 <td>
                                   {new Date(
                                     inv.invoiceDate || inv.createdAt,
                                   ).toLocaleDateString("en-IN")}
                                 </td>
-                                <td>{inv.customer?.name}</td>
+                                <td>
+                                  {inv.customer?.name || inv.customerName || "Walk-in Customer"}
+                                </td>
                                 <td>
                                   <span
                                     style={{
@@ -6300,6 +6965,7 @@ export default function App() {
                                   style={{
                                     textAlign: "right",
                                     fontWeight: 600,
+                                    textDecoration: inv.status === "CANCELLED" ? "line-through" : "none",
                                   }}
                                 >
                                   ₹{Number(inv.billAmount).toFixed(2)}
@@ -6324,18 +6990,48 @@ export default function App() {
             {/* Sub-tab 2: Purchases Report */}
             {reportSubTab === "purchases" && purchasesReportData && (
               <div>
-                <div className="stats-grid">
-                  <div className="stat-card">
-                    <div className="stat-label">Total Inward Purchases</div>
-                    <div className="stat-value">
+                {/* Summary Cards */}
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                    gap: "16px",
+                    marginBottom: "20px",
+                  }}
+                >
+                  <div className="card">
+                    <div
+                      style={{
+                        fontSize: "0.8125rem",
+                        fontWeight: 600,
+                        color: "var(--text-secondary)",
+                        marginBottom: "4px",
+                      }}
+                    >
+                      Total Inward Purchases
+                    </div>
+                    <div
+                      style={{
+                        fontSize: "1.5rem",
+                        fontWeight: 700,
+                        color: "var(--text-primary)",
+                      }}
+                    >
                       ₹
                       {Number(
                         purchasesReportData.summary?.totalPurchases || 0,
-                      ).toLocaleString("en-IN")}
+                      ).toFixed(2)}
                     </div>
-                    <div className="stat-hint">
-                      {purchasesReportData.summary?.purchaseCount || 0} purchase
-                      orders
+                    <div
+                      style={{
+                        fontSize: "0.75rem",
+                        color: "var(--text-secondary)",
+                        marginTop: "4px",
+                      }}
+                    >
+                      {purchasesReportData.summary?.purchaseCount || 0} active orders
+                      {purchasesReportData.summary?.cancelledCount > 0 &&
+                        ` (${purchasesReportData.summary.cancelledCount} cancelled)`}
                     </div>
                   </div>
                 </div>
@@ -6359,30 +7055,185 @@ export default function App() {
                             <th>Date</th>
                             <th>Supplier</th>
                             <th>Reference Bill #</th>
-                            <th>Items Count</th>
+                            <th style={{ textAlign: "center" }}>Details</th>
                             <th style={{ textAlign: "right" }}>Total Amount</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {purchasesReportData.purchases.map((p) => (
-                            <tr key={p.id}>
-                              <td>
-                                {new Date(
-                                  p.purchaseDate || p.createdAt,
-                                ).toLocaleDateString("en-IN")}
-                              </td>
-                              <td style={{ fontWeight: 600 }}>
-                                {p.supplier?.name}
-                              </td>
-                              <td>{p.referenceNumber}</td>
-                              <td>{p.items?.length || 0} items</td>
-                              <td
-                                style={{ textAlign: "right", fontWeight: 600 }}
-                              >
-                                ₹{Number(p.totalAmount).toFixed(2)}
-                              </td>
-                            </tr>
-                          ))}
+                          {purchasesReportData.purchases.map((p) => {
+                            const isExpanded = expandedReportPurchaseId === p.id;
+                            return (
+                              <React.Fragment key={p.id}>
+                                <tr style={p.status === "CANCELLED" ? { opacity: 0.75 } : undefined}>
+                                  <td>
+                                    {new Date(
+                                      p.purchaseDate || p.createdAt,
+                                    ).toLocaleDateString("en-IN")}
+                                  </td>
+                                  <td style={{ fontWeight: 600 }}>
+                                    {p.supplier?.name || p.supplierName || "—"}
+                                  </td>
+                                  <td>
+                                    {p.referenceNumber}
+                                    {p.status === "CANCELLED" && (
+                                      <span
+                                        className="badge badge-danger"
+                                        style={{ marginLeft: "6px" }}
+                                        title={p.cancellationReason ? `Reason: ${p.cancellationReason}` : "Cancelled"}
+                                      >
+                                        CANCELLED
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td style={{ textAlign: "center" }}>
+                                    <button
+                                      type="button"
+                                      className="btn btn-secondary btn-sm"
+                                      onClick={() =>
+                                        setExpandedReportPurchaseId(
+                                          isExpanded ? null : p.id,
+                                        )
+                                      }
+                                      style={{
+                                        fontSize: "0.75rem",
+                                        padding: "4px 10px",
+                                      }}
+                                    >
+                                      <Eye size={13} />{" "}
+                                      {isExpanded
+                                        ? "Hide"
+                                        : `${p.items?.length ?? p.itemCount ?? 0} items`}
+                                    </button>
+                                  </td>
+                                  <td
+                                    style={{
+                                      textAlign: "right",
+                                      fontWeight: 600,
+                                      textDecoration: p.status === "CANCELLED" ? "line-through" : "none",
+                                    }}
+                                  >
+                                    ₹{Number(p.totalAmount).toFixed(2)}
+                                  </td>
+                                </tr>
+                                {isExpanded && (
+                                  <tr>
+                                    <td
+                                      colSpan={5}
+                                      style={{
+                                        background: "var(--bg-canvas)",
+                                        padding: "16px 20px",
+                                        borderLeft:
+                                          "4px solid var(--primary)",
+                                      }}
+                                    >
+                                      <div
+                                        style={{
+                                          display: "flex",
+                                          justifyContent: "space-between",
+                                          alignItems: "center",
+                                          marginBottom: "10px",
+                                        }}
+                                      >
+                                        <div
+                                          style={{
+                                            fontWeight: 600,
+                                            fontSize: "0.875rem",
+                                          }}
+                                        >
+                                          Line Items Breakdown for Ref #{p.referenceNumber} (
+                                          {p.items?.length || 0} items):
+                                        </div>
+                                        <div
+                                          style={{
+                                            fontSize: "0.8125rem",
+                                            color: "var(--text-secondary)",
+                                          }}
+                                        >
+                                          Total: ₹{Number(p.totalAmount || 0).toFixed(2)}
+                                        </div>
+                                      </div>
+                                      <table
+                                        className="data-table"
+                                        style={{ fontSize: "0.8125rem" }}
+                                      >
+                                        <thead>
+                                          <tr>
+                                            <th>Item Description</th>
+                                            <th>HSN/SAC Code</th>
+                                            <th
+                                              style={{ textAlign: "right" }}
+                                            >
+                                              Quantity
+                                            </th>
+                                            <th
+                                              style={{ textAlign: "right" }}
+                                            >
+                                              Unit Rate
+                                            </th>
+                                            <th
+                                              style={{ textAlign: "right" }}
+                                            >
+                                              GST Rate
+                                            </th>
+                                            <th
+                                              style={{ textAlign: "right" }}
+                                            >
+                                              Total Amount
+                                            </th>
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {p.items?.map((it) => (
+                                            <tr key={it.id}>
+                                              <td
+                                                style={{ fontWeight: 600 }}
+                                              >
+                                                {it.product?.name || "—"}
+                                              </td>
+                                              <td>
+                                                {it.product?.hsnCode || "-"}
+                                              </td>
+                                              <td
+                                                style={{
+                                                  textAlign: "right",
+                                                }}
+                                              >
+                                                {Number(it.qty)}
+                                              </td>
+                                              <td
+                                                style={{
+                                                  textAlign: "right",
+                                                }}
+                                              >
+                                                ₹
+                                                {Number(it.rate).toFixed(2)}
+                                              </td>
+                                              <td
+                                                style={{
+                                                  textAlign: "right",
+                                                }}
+                                              >
+                                                {it.gstRate}%
+                                              </td>
+                                              <td
+                                                style={{
+                                                  textAlign: "right",
+                                                  fontWeight: 600,
+                                                }}
+                                              >
+                                                ₹
+                                                {Number(it.amount).toFixed(2)}
+                                              </td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </td>
+                                  </tr>
+                                )}
+                              </React.Fragment>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
@@ -6878,6 +7729,228 @@ export default function App() {
                   {submittingReturn
                     ? "Processing..."
                     : "Confirm Return & Add Stock"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: CANCEL INVOICE */}
+      {/* ========================================================================= */}
+      {cancelInvoiceModal && (
+        <div className="modal-backdrop">
+          <div className="modal-content" style={{ maxWidth: "500px" }}>
+            <div className="modal-header">
+              <div>
+                <div
+                  className="modal-title"
+                  style={{
+                    color: "var(--status-danger)",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                  }}
+                >
+                  <AlertTriangle size={20} />
+                  Cancel Invoice
+                </div>
+                <div
+                  style={{
+                    fontSize: "0.875rem",
+                    color: "var(--text-secondary)",
+                    marginTop: "2px",
+                  }}
+                >
+                  Invoice: <strong>{cancelInvoiceModal.invoiceNumber}</strong> ·
+                  Customer:{" "}
+                  <strong>
+                    {cancelInvoiceModal.customer?.name || "Walk-in Customer"}
+                  </strong>
+                </div>
+              </div>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => setCancelInvoiceModal(null)}
+                style={{ border: "none" }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleCancelInvoice}>
+              <div
+                style={{
+                  padding: "12px 14px",
+                  background: "var(--bg-subtle)",
+                  border: "1px solid var(--border)",
+                  borderRadius: "var(--radius)",
+                  fontSize: "0.875rem",
+                  color: "var(--text-secondary)",
+                  marginBottom: "16px",
+                  lineHeight: 1.5,
+                }}
+              >
+                <strong style={{ color: "var(--text-primary)" }}>
+                  Stock Restoration Warning:
+                </strong>{" "}
+                Cancelling this invoice will permanently mark it as cancelled,
+                exclude it from sales reports and dashboards, and automatically
+                return all billed product quantities back into stock.
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">
+                  Cancellation Reason{" "}
+                  <span style={{ color: "var(--status-danger)" }}>*</span>
+                </label>
+                <textarea
+                  className="form-input"
+                  style={{ minHeight: "80px", resize: "vertical" }}
+                  placeholder="Why is this invoice being cancelled? (e.g., duplicate entry, wrong customer, wrong items billed)"
+                  value={cancelInvoiceReason}
+                  onChange={(e) => setCancelInvoiceReason(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: "12px",
+                  marginTop: "20px",
+                }}
+              >
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setCancelInvoiceModal(null)}
+                  style={{ width: "100%", fontWeight: 600 }}
+                >
+                  Keep Invoice
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-danger-solid"
+                  style={{ width: "100%", fontWeight: 600 }}
+                  disabled={cancellingInvoice}
+                >
+                  {cancellingInvoice
+                    ? "Cancelling..."
+                    : "Cancel Invoice"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: CANCEL PURCHASE */}
+      {/* ========================================================================= */}
+      {cancelPurchaseModal && (
+        <div className="modal-backdrop">
+          <div className="modal-content" style={{ maxWidth: "500px" }}>
+            <div className="modal-header">
+              <div>
+                <div
+                  className="modal-title"
+                  style={{
+                    color: "var(--status-danger)",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                  }}
+                >
+                  <AlertTriangle size={20} />
+                  Cancel Purchase Entry
+                </div>
+                <div
+                  style={{
+                    fontSize: "0.875rem",
+                    color: "var(--text-secondary)",
+                    marginTop: "2px",
+                  }}
+                >
+                  Ref: <strong>{cancelPurchaseModal.referenceNumber}</strong> ·
+                  Supplier:{" "}
+                  <strong>
+                    {cancelPurchaseModal.supplier?.name || "Vendor"}
+                  </strong>
+                </div>
+              </div>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => setCancelPurchaseModal(null)}
+                style={{ border: "none" }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleCancelPurchase}>
+              <div
+                style={{
+                  padding: "12px 14px",
+                  background: "var(--bg-subtle)",
+                  border: "1px solid var(--border)",
+                  borderRadius: "var(--radius)",
+                  fontSize: "0.875rem",
+                  color: "var(--text-secondary)",
+                  marginBottom: "16px",
+                  lineHeight: 1.5,
+                }}
+              >
+                <strong style={{ color: "var(--text-primary)" }}>
+                  Stock Reduction Notice:
+                </strong>{" "}
+                Cancelling will atomically reduce the purchased quantities from
+                inventory. If any items have already been sold, the cancellation
+                will be blocked to prevent negative stock.
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">
+                  Cancellation Reason{" "}
+                  <span style={{ color: "var(--status-danger)" }}>*</span>
+                </label>
+                <textarea
+                  className="form-input"
+                  style={{ minHeight: "80px", resize: "vertical" }}
+                  placeholder="Why is this purchase entry being cancelled? (e.g., entered by mistake, wrong supplier bill number)"
+                  value={cancelPurchaseReason}
+                  onChange={(e) => setCancelPurchaseReason(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: "12px",
+                  marginTop: "20px",
+                }}
+              >
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setCancelPurchaseModal(null)}
+                  style={{ width: "100%", fontWeight: 600 }}
+                >
+                  Keep Purchase
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-danger-solid"
+                  style={{ width: "100%", fontWeight: 600 }}
+                  disabled={cancellingPurchase}
+                >
+                  {cancellingPurchase
+                    ? "Cancelling..."
+                    : "Cancel Purchase"}
                 </button>
               </div>
             </form>

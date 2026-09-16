@@ -77,6 +77,20 @@ router.post('/', async (req, res) => {
 
     const refNum = referenceNumber.trim();
 
+    let parsedPurchaseDate = new Date();
+    if (purchaseDate) {
+      const d = new Date(purchaseDate);
+      if (isNaN(d.getTime())) {
+        return res.status(400).json({ error: 'Invalid purchase date provided' });
+      }
+      const endOfToday = new Date();
+      endOfToday.setHours(23, 59, 59, 999);
+      if (d > endOfToday) {
+        return res.status(400).json({ error: 'Purchase date cannot be in the future' });
+      }
+      parsedPurchaseDate = d;
+    }
+
     // Single DB transaction for purchase + items + stock_transactions + stock updates
     const savedPurchase = await prisma.$transaction(async (tx) => {
       // 1. Verify supplier
@@ -172,7 +186,7 @@ router.post('/', async (req, res) => {
         data: {
           supplierId: supplier.id,
           referenceNumber: refNum,
-          purchaseDate: purchaseDate ? new Date(purchaseDate) : new Date(),
+          purchaseDate: parsedPurchaseDate,
           totalAmount: totalAmount.toDecimalPlaces(2, Decimal.ROUND_HALF_UP),
           notes: notes ? notes.trim() : null,
           items: {
@@ -188,12 +202,105 @@ router.post('/', async (req, res) => {
       });
 
       return purchase;
-    });
+    }, { maxWait: 15000, timeout: 20000 });
 
     res.status(201).json(savedPurchase);
   } catch (error) {
     console.error('Error creating purchase:', error.message);
     res.status(400).json({ error: error.message || 'Failed to create purchase' });
+  }
+});
+
+// POST /purchases/:id/cancel - Cancel mistaken purchase (atomic stock reduction with guard)
+router.post('/:id/cancel', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+
+    if (!reason || !reason.trim()) {
+      return res.status(400).json({ error: 'Cancellation reason is required' });
+    }
+
+    const cancelledPurchase = await prisma.$transaction(async (tx) => {
+      const purchase = await tx.purchase.findUnique({
+        where: { id },
+        include: {
+          items: {
+            include: { product: true },
+          },
+        },
+      });
+
+      if (!purchase) {
+        throw new Error('Purchase not found');
+      }
+
+      if (purchase.status === 'CANCELLED') {
+        throw new Error('Purchase is already cancelled');
+      }
+
+      // Decrement stock for each item atomically using updateMany with currentStock >= qty guard.
+      // If even ONE item has insufficient stock (count === 0), throw an error to immediately abort
+      // and roll back the entire transaction (all-or-nothing).
+      for (const item of purchase.items) {
+        const itemQty = new Decimal(item.qty);
+
+        const updated = await tx.product.updateMany({
+          where: {
+            id: item.productId,
+            currentStock: { gte: itemQty },
+          },
+          data: {
+            currentStock: { decrement: itemQty },
+          },
+        });
+
+        if (updated.count === 0) {
+          const fresh = await tx.product.findUnique({
+            where: { id: item.productId },
+            select: { name: true, currentStock: true },
+          });
+          const prodName = fresh?.name || item.product?.name || item.productId;
+          const availableStock = fresh?.currentStock?.toString() || '0';
+          throw new Error(
+            `Cannot cancel purchase: Insufficient stock for product "${prodName}". Available stock: ${availableStock}, Required to reverse: ${itemQty.toString()}. Some items may have already been sold.`
+          );
+        }
+
+        // Record stock transaction of type PURCHASE_CANCELLED (negative qty for stock out)
+        await tx.stockTransaction.create({
+          data: {
+            productId: item.productId,
+            type: 'PURCHASE_CANCELLED',
+            quantity: itemQty.negated(),
+            reference: purchase.referenceNumber || purchase.id,
+          },
+        });
+      }
+
+      // Mark purchase as CANCELLED
+      const updatedPurchase = await tx.purchase.update({
+        where: { id },
+        data: {
+          status: 'CANCELLED',
+          cancellationReason: reason.trim(),
+          cancelledAt: new Date(),
+        },
+        include: {
+          supplier: true,
+          items: {
+            include: { product: true },
+          },
+        },
+      });
+
+      return updatedPurchase;
+    }, { maxWait: 15000, timeout: 20000 });
+
+    res.json(cancelledPurchase);
+  } catch (error) {
+    console.error('Error cancelling purchase:', error.message);
+    res.status(400).json({ error: error.message || 'Failed to cancel purchase' });
   }
 });
 

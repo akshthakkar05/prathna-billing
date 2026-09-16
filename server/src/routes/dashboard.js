@@ -83,26 +83,28 @@ router.get('/summary', async (req, res) => {
     todayEnd.setHours(23, 59, 59, 999);
 
     const [rangeInvoices, todayInvoices, allProducts, recentInvoices] = await Promise.all([
-      // 1. Invoices in chosen range
+      // 1. Invoices in chosen range (exclude cancelled)
       prisma.invoice.findMany({
         where: {
           invoiceDate: {
             gte: dateRange.start,
             lte: dateRange.end,
           },
+          status: { not: 'CANCELLED' },
         },
         select: {
           billAmount: true,
         },
       }),
 
-      // 2. Invoices strictly today (for backward compat)
+      // 2. Invoices strictly today (for backward compat, exclude cancelled)
       prisma.invoice.findMany({
         where: {
           invoiceDate: {
             gte: todayStart,
             lte: todayEnd,
           },
+          status: { not: 'CANCELLED' },
         },
         select: {
           billAmount: true,
@@ -211,6 +213,9 @@ router.get('/summary', async (req, res) => {
         customerMobile: inv.customer?.mobile || '',
         billAmount: inv.billAmount.toString(),
         paymentStatus: inv.paymentStatus,
+        status: inv.status || 'ACTIVE',
+        cancellationReason: inv.cancellationReason,
+        cancelledAt: inv.cancelledAt,
       })),
     });
   } catch (error) {
@@ -255,6 +260,7 @@ router.get('/sales-trend', async (req, res) => {
           gte: startDate,
           lte: now,
         },
+        status: { not: 'CANCELLED' },
       },
       select: {
         invoiceDate: true,

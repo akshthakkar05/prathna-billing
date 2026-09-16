@@ -39,18 +39,24 @@ router.get('/sales', async (req, res) => {
     let totalSGST = new Decimal(0);
     let totalIGST = new Decimal(0);
     let totalSales = new Decimal(0);
+    let activeInvoiceCount = 0;
 
     for (const inv of invoices) {
-      totalTaxable = totalTaxable.plus(new Decimal(inv.taxableTotal));
-      totalCGST = totalCGST.plus(new Decimal(inv.cgstTotal));
-      totalSGST = totalSGST.plus(new Decimal(inv.sgstTotal));
-      totalIGST = totalIGST.plus(new Decimal(inv.igstTotal || 0));
-      totalSales = totalSales.plus(new Decimal(inv.billAmount));
+      if (inv.status !== 'CANCELLED') {
+        totalTaxable = totalTaxable.plus(new Decimal(inv.taxableTotal));
+        totalCGST = totalCGST.plus(new Decimal(inv.cgstTotal));
+        totalSGST = totalSGST.plus(new Decimal(inv.sgstTotal));
+        totalIGST = totalIGST.plus(new Decimal(inv.igstTotal || 0));
+        totalSales = totalSales.plus(new Decimal(inv.billAmount));
+        activeInvoiceCount++;
+      }
     }
 
     res.json({
       summary: {
-        invoiceCount: invoices.length,
+        invoiceCount: activeInvoiceCount,
+        totalInvoices: invoices.length,
+        cancelledCount: invoices.length - activeInvoiceCount,
         totalTaxable: totalTaxable.toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toString(),
         taxableTotal: totalTaxable.toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toString(),
         totalCGST: totalCGST.toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toString(),
@@ -67,7 +73,9 @@ router.get('/sales', async (req, res) => {
         invoiceDate: inv.invoiceDate,
         customerName: inv.customer?.name || 'Walk-in Customer',
         customerMobile: inv.customer?.mobile,
+        customer: inv.customer,
         itemCount: inv.items.length,
+        items: inv.items,
         taxType: inv.taxType || 'INTRASTATE',
         taxableTotal: inv.taxableTotal.toString(),
         cgstTotal: inv.cgstTotal.toString(),
@@ -75,6 +83,9 @@ router.get('/sales', async (req, res) => {
         igstTotal: (inv.igstTotal || 0).toString(),
         billAmount: inv.billAmount.toString(),
         paymentStatus: inv.paymentStatus,
+        status: inv.status || 'ACTIVE',
+        cancellationReason: inv.cancellationReason,
+        cancelledAt: inv.cancelledAt,
       })),
     });
   } catch (error) {
@@ -108,19 +119,29 @@ router.get('/purchases', async (req, res) => {
       orderBy: { purchaseDate: 'desc' },
       include: {
         supplier: { select: { name: true, mobile: true, gstin: true } },
-        items: true,
+        items: {
+          include: {
+            product: true,
+          },
+        },
       },
     });
 
     let totalPurchases = new Decimal(0);
+    let activePurchaseCount = 0;
 
     for (const p of purchases) {
-      totalPurchases = totalPurchases.plus(new Decimal(p.totalAmount));
+      if (p.status !== 'CANCELLED') {
+        totalPurchases = totalPurchases.plus(new Decimal(p.totalAmount));
+        activePurchaseCount++;
+      }
     }
 
     res.json({
       summary: {
-        purchaseCount: purchases.length,
+        purchaseCount: activePurchaseCount,
+        totalPurchasesCount: purchases.length,
+        cancelledCount: purchases.length - activePurchaseCount,
         totalPurchases: totalPurchases.toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toString(),
       },
       purchases: purchases.map((p) => ({
@@ -128,8 +149,13 @@ router.get('/purchases', async (req, res) => {
         referenceNumber: p.referenceNumber,
         purchaseDate: p.purchaseDate,
         supplierName: p.supplier?.name || 'Vendor',
+        supplier: p.supplier,
         itemCount: p.items.length,
+        items: p.items,
         totalAmount: p.totalAmount.toString(),
+        status: p.status || 'ACTIVE',
+        cancellationReason: p.cancellationReason,
+        cancelledAt: p.cancelledAt,
       })),
     });
   } catch (error) {

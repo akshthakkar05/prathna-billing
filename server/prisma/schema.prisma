@@ -67,6 +67,10 @@ model Invoice {
   paymentStatus String  @default("PAID") // UNPAID | PARTIAL | PAID
   paymentMethod String? @default("CASH") // CASH | UPI | CARD | CREDIT
 
+  status             String    @default("ACTIVE") // ACTIVE | CANCELLED
+  cancellationReason String?
+  cancelledAt        DateTime?
+
   createdAt DateTime @default(now())
 
   items   InvoiceItem[]
@@ -102,7 +106,7 @@ model StockTransaction {
   productId String
   product   Product  @relation(fields: [productId], references: [id])
 
-  type      String   // PURCHASE | SALE | SALES_RETURN | PURCHASE_RETURN | ADJUSTMENT
+  type      String   // PURCHASE | SALE | SALES_RETURN | PURCHASE_RETURN | ADJUSTMENT | CANCELLATION | PURCHASE_CANCELLED
   quantity  Decimal  @db.Decimal(10, 2) // positive = stock in, negative = stock out
   reference String?  // e.g. invoice id or purchase id
   createdAt DateTime @default(now())
@@ -131,7 +135,12 @@ model Purchase {
   purchaseDate    DateTime @default(now())
   totalAmount     Decimal  @db.Decimal(10, 2)
   notes           String?
-  createdAt       DateTime @default(now())
+
+  status             String    @default("ACTIVE") // ACTIVE | CANCELLED
+  cancellationReason String?
+  cancelledAt        DateTime?
+
+  createdAt DateTime @default(now())
 
   items PurchaseItem[]
 }
