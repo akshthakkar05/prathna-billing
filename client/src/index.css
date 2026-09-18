@@ -2184,15 +2184,19 @@ h1, h2, h3, h4, h5, h6,
 @media print {
   @page {
     size: A4 portrait;
-    margin: 10mm 12mm;
+    margin: 0 !important; /* Strips browser-generated headers (date/title) and footers (URL/page numbers) */
   }
 
-  body {
+  html, body {
     background: #ffffff !important;
     color: #000000 !important;
     font-size: 11pt !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    height: auto !important;
   }
 
   /* Hide entire web app UI during print */
@@ -2245,9 +2249,10 @@ h1, h2, h3, h4, h5, h6,
   }
 
   .statement-container {
-    padding: 0 !important;
+    padding: 12mm 15mm !important;
     margin: 0 !important;
     width: 100% !important;
+    box-sizing: border-box !important;
   }
 
   .statement-letterhead {

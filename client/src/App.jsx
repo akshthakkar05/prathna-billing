@@ -10794,16 +10794,16 @@ export default function App() {
                         <div className="statement-card-heading">Account Overview</div>
                         <div className="statement-kpi-row">
                           <span>Total Invoiced (Billed):</span>
-                          <strong>₹{Number(data.summary.totalBilled).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</strong>
+                          <strong>₹{Number(data.summary.totalBilled ?? data.summary.totalInvoiced ?? 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</strong>
                         </div>
                         <div className="statement-kpi-row">
                           <span>Total Paid (Received):</span>
-                          <strong style={{ color: "var(--success)" }}>₹{Number(data.summary.totalPaid).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</strong>
+                          <strong style={{ color: "var(--success)" }}>₹{Number(data.summary.totalPaid || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</strong>
                         </div>
                         <div className="statement-kpi-row total-due-row">
                           <span>Closing Balance (Due):</span>
-                          <strong style={{ color: data.summary.currentBalance > 0 ? "var(--danger)" : "var(--success)" }}>
-                            ₹{Number(data.summary.currentBalance).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                          <strong style={{ color: (data.summary.currentBalance || 0) > 0 ? "var(--danger)" : "var(--success)" }}>
+                            ₹{Number(data.summary.currentBalance || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
                           </strong>
                         </div>
                       </div>
@@ -10860,10 +10860,10 @@ export default function App() {
                           <tfoot>
                             <tr>
                               <td colSpan="4" style={{ textAlign: "right", fontWeight: 700 }}>Total / Closing:</td>
-                              <td style={{ textAlign: "right" }}>₹{Number(data.summary.totalBilled).toFixed(2)}</td>
-                              <td style={{ textAlign: "right", color: "var(--success)" }}>₹{Number(data.summary.totalPaid).toFixed(2)}</td>
-                              <td style={{ textAlign: "right", color: data.summary.currentBalance > 0 ? "var(--danger)" : "inherit" }}>
-                                ₹{Number(data.summary.currentBalance).toFixed(2)}
+                              <td style={{ textAlign: "right" }}>₹{Number(data.summary.totalBilled ?? data.summary.totalInvoiced ?? 0).toFixed(2)}</td>
+                              <td style={{ textAlign: "right", color: "var(--success)" }}>₹{Number(data.summary.totalPaid || 0).toFixed(2)}</td>
+                              <td style={{ textAlign: "right", color: (data.summary.currentBalance || 0) > 0 ? "var(--danger)" : "inherit" }}>
+                                ₹{Number(data.summary.currentBalance || 0).toFixed(2)}
                               </td>
                             </tr>
                           </tfoot>

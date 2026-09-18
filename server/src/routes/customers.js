@@ -300,8 +300,10 @@ router.get('/:id/ledger', async (req, res) => {
       transactions,
       summary: {
         totalInvoiced: totalBilled.toFixed(2),
+        totalBilled: totalBilled.toFixed(2),
         totalPaid: totalPaid.toFixed(2),
         currentBalance: totalOutstanding.toFixed(2),
+        totalOutstanding: totalOutstanding.toFixed(2),
         invoiceCount: formattedInvoices.length,
         unpaidCount: formattedInvoices.filter((i) => i.paymentStatus !== 'PAID').length,
       },
