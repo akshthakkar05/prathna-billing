@@ -23,8 +23,8 @@ model Product {
   sku           String?  @unique
   hsnCode       String
   gstRate       Decimal  @db.Decimal(5, 2) // e.g. 18.00
-  purchasePrice Decimal  @db.Decimal(10, 2)
-  sellingPrice  Decimal  @db.Decimal(10, 2)
+  purchasePrice Decimal  @db.Decimal(12, 6)
+  sellingPrice  Decimal  @db.Decimal(12, 6)
   currentStock  Decimal  @default(0) @db.Decimal(10, 2)
   minStockLevel Decimal  @default(0) @db.Decimal(10, 2)
   unit          String   @default("PCS")
@@ -57,14 +57,15 @@ model Invoice {
   customer   Customer @relation(fields: [customerId], references: [id])
 
   taxType      String  @default("INTRASTATE") // INTRASTATE | INTERSTATE
-  taxableTotal Decimal @db.Decimal(10, 2)
-  cgstTotal    Decimal @db.Decimal(10, 2)
-  sgstTotal    Decimal @db.Decimal(10, 2)
-  igstTotal    Decimal @default(0) @db.Decimal(10, 2)
-  roundOff     Decimal @default(0) @db.Decimal(10, 2)
-  billAmount   Decimal @db.Decimal(10, 2)
+  taxableTotal Decimal @db.Decimal(12, 6)
+  cgstTotal    Decimal @db.Decimal(12, 6)
+  sgstTotal    Decimal @db.Decimal(12, 6)
+  igstTotal    Decimal @default(0) @db.Decimal(12, 6)
+  roundOff     Decimal @default(0) @db.Decimal(12, 6)
+  billAmount   Decimal @db.Decimal(12, 6)
 
-  paymentStatus String  @default("PAID") // UNPAID | PARTIAL | PAID
+  paymentStatus String  @default("UNPAID") // UNPAID | PARTIAL | PAID
+  paidAmount    Decimal @default(0) @db.Decimal(12, 6)
   paymentMethod String? @default("CASH") // CASH | UPI | CARD | CREDIT
 
   status             String    @default("ACTIVE") // ACTIVE | CANCELLED
@@ -91,12 +92,12 @@ model InvoiceItem {
   gstRateSnapshot     Decimal @db.Decimal(5, 2)
 
   qty          Decimal @db.Decimal(10, 2)
-  rate         Decimal @db.Decimal(10, 2) // rate excl. GST
-  taxableValue Decimal @db.Decimal(10, 2)
-  cgstAmount   Decimal @db.Decimal(10, 2)
-  sgstAmount   Decimal @db.Decimal(10, 2)
-  igstAmount   Decimal @default(0) @db.Decimal(10, 2)
-  amount       Decimal @db.Decimal(10, 2) // final line total
+  rate         Decimal @db.Decimal(12, 6) // rate excl. GST
+  taxableValue Decimal @db.Decimal(12, 6)
+  cgstAmount   Decimal @db.Decimal(12, 6)
+  sgstAmount   Decimal @db.Decimal(12, 6)
+  igstAmount   Decimal @default(0) @db.Decimal(12, 6)
+  amount       Decimal @db.Decimal(12, 6) // final line total
 
   returnItems SalesReturnItem[]
 }
@@ -133,7 +134,9 @@ model Purchase {
   supplier        Supplier @relation(fields: [supplierId], references: [id])
   referenceNumber String   // invoice/reference number
   purchaseDate    DateTime @default(now())
-  totalAmount     Decimal  @db.Decimal(10, 2)
+  totalAmount     Decimal  @db.Decimal(12, 6)
+  paidAmount      Decimal  @default(0) @db.Decimal(12, 6)
+  paymentStatus   String   @default("UNPAID") // UNPAID | PARTIAL | PAID
   notes           String?
 
   status             String    @default("ACTIVE") // ACTIVE | CANCELLED
@@ -146,16 +149,19 @@ model Purchase {
 }
 
 model PurchaseItem {
-  id         String   @id @default(uuid())
-  purchaseId String
-  purchase   Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
-  productId  String
-  product    Product  @relation(fields: [productId], references: [id])
+  id           String   @id @default(uuid())
+  purchaseId   String
+  purchase     Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  productId    String
+  product      Product  @relation(fields: [productId], references: [id])
 
-  qty     Decimal @db.Decimal(10, 2)
-  rate    Decimal @db.Decimal(10, 2)
-  gstRate Decimal @db.Decimal(5, 2)
-  amount  Decimal @db.Decimal(10, 2)
+  qty          Decimal  @db.Decimal(10, 2)
+  rate         Decimal  @db.Decimal(12, 6)
+  gstRate      Decimal  @db.Decimal(5, 2)
+  taxableValue Decimal  @default(0) @db.Decimal(12, 6)
+  gstAmount    Decimal  @default(0) @db.Decimal(12, 6)
+  isInclusive  Boolean  @default(true)
+  amount       Decimal  @db.Decimal(12, 6)
 }
 
 model InvoiceCounter {
@@ -185,7 +191,7 @@ model SalesReturn {
   invoice     Invoice  @relation(fields: [invoiceId], references: [id])
   returnDate  DateTime @default(now())
   reason      String?
-  totalAmount Decimal  @db.Decimal(10, 2)
+  totalAmount Decimal  @db.Decimal(12, 6)
   createdAt   DateTime @default(now())
 
   items SalesReturnItem[]
@@ -199,5 +205,35 @@ model SalesReturnItem {
   invoiceItem   InvoiceItem @relation(fields: [invoiceItemId], references: [id])
 
   qty    Decimal @db.Decimal(10, 2)
-  amount Decimal @db.Decimal(10, 2)
+  amount Decimal @db.Decimal(12, 6)
 }
+
+model EditLog {
+  id           String   @id @default(uuid())
+  entityType   String   // INVOICE | PURCHASE
+  entityId     String
+  fieldChanged String
+  oldValue     String?
+  newValue     String?
+  reason       String
+  editedAt     DateTime @default(now())
+}
+
+model Payment {
+  id            String    @id @default(uuid())
+  entityType    String    // INVOICE | PURCHASE
+  entityId      String
+  amount        Decimal   @db.Decimal(12, 6)
+  paymentDate   DateTime  @default(now())
+  paymentMethod String    @default("CASH") // CASH | UPI | CARD | BANK_TRANSFER
+  notes         String?
+  status        String    @default("ACTIVE") // ACTIVE | VOIDED
+  voidReason    String?
+  voidedAt      DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([entityType, entityId])
+  @@index([paymentDate])
+}
+
+

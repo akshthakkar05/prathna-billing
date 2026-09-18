@@ -71,7 +71,7 @@ test('Weighted Average Cost: starting stock 50 @ ₹150, purchase 30 more @ ₹1
     },
   });
 
-  // 3. Purchase 30 units @ ₹180 via POST /purchases endpoint
+  // 3. Purchase 30 units @ ₹180 (GST-exclusive) via POST /purchases endpoint
   const res = await fetch(`${baseUrl}/purchases`, {
     method: 'POST',
     headers: {
@@ -87,6 +87,7 @@ test('Weighted Average Cost: starting stock 50 @ ₹150, purchase 30 more @ ₹1
           qty: 30,
           rate: 180,
           gstRate: 18,
+          isInclusive: false,
         },
       ],
     }),
@@ -148,6 +149,7 @@ test('Weighted Average Cost: initial stock 0 (or empty), purchase sets purchaseP
           qty: 25,
           rate: 320,
           gstRate: 18,
+          isInclusive: false,
         },
       ],
     }),
@@ -162,6 +164,64 @@ test('Weighted Average Cost: initial stock 0 (or empty), purchase sets purchaseP
   assert.equal(updatedProduct.currentStock.toString(), '25');
   assert.equal(updatedProduct.purchasePrice.toString(), '320', 'purchasePrice should be set directly to purchase rate 320');
   assert.equal(updatedProduct.sellingPrice.toString(), '500', 'sellingPrice must remain 500');
+});
+
+test('Weighted Average Cost: GST-inclusive purchase derives taxable unit cost for valuation', async () => {
+  const uniqueSuffix = Date.now().toString().slice(-6);
+
+  const supplier = await prisma.supplier.create({
+    data: {
+      name: `Inclusive Supplier ${uniqueSuffix}`,
+    },
+  });
+
+  // Starting stock 10 @ ₹100
+  const product = await prisma.product.create({
+    data: {
+      name: `Inclusive Weighted Item ${uniqueSuffix}`,
+      hsnCode: '998314',
+      gstRate: new Decimal('18.00'),
+      purchasePrice: new Decimal('100.00'),
+      sellingPrice: new Decimal('200.00'),
+      currentStock: new Decimal('10.00'),
+      minStockLevel: new Decimal('2.00'),
+      unit: 'PCS',
+      isActive: true,
+    },
+  });
+
+  // Purchase 10 units @ ₹236 (GST-inclusive @ 18% -> taxable unit cost is ₹200)
+  const res = await fetch(`${baseUrl}/purchases`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      supplierId: supplier.id,
+      referenceNumber: `PO-INC-${uniqueSuffix}`,
+      items: [
+        {
+          productId: product.id,
+          qty: 10,
+          rate: 236,
+          gstRate: 18,
+          isInclusive: true,
+        },
+      ],
+    }),
+  });
+
+  assert.equal(res.status, 201);
+
+  const updatedProduct = await prisma.product.findUnique({
+    where: { id: product.id },
+  });
+
+  // Stock = 10 + 10 = 20
+  assert.equal(updatedProduct.currentStock.toString(), '20');
+  // purchasePrice = ((10 * 100) + (10 * 200)) / 20 = (1000 + 2000) / 20 = 150
+  assert.equal(updatedProduct.purchasePrice.toString(), '150');
 });
 
 test('Stock Valuation Report: GET /reports/stock strictly asserts stockValuation === currentStock * purchasePrice', async () => {

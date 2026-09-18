@@ -14,6 +14,7 @@ import settingsRouter from "./routes/settings.js";
 import dashboardRouter from "./routes/dashboard.js";
 import reportsRouter from "./routes/reports.js";
 import stockRouter from "./routes/stock.js";
+import paymentsRouter from "./routes/payments.js";
 
 import authRouter from "./routes/auth.js";
 import { requireAuth, enforcePasswordChange } from "./middleware/auth.js";
@@ -118,6 +119,10 @@ app.use("/api/reports", requireAuth, enforcePasswordChange, reportsRouter);
 // Stock Transactions & Adjustments
 app.use("/stock", requireAuth, enforcePasswordChange, stockRouter);
 app.use("/api/stock", requireAuth, enforcePasswordChange, stockRouter);
+
+// Payments & Ledger
+app.use("/payments", requireAuth, enforcePasswordChange, paymentsRouter);
+app.use("/api/payments", requireAuth, enforcePasswordChange, paymentsRouter);
 
 // Global Error Handler
 app.use((err, req, res, next) => {

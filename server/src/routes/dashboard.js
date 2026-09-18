@@ -82,7 +82,7 @@ router.get('/summary', async (req, res) => {
     const todayEnd = new Date();
     todayEnd.setHours(23, 59, 59, 999);
 
-    const [rangeInvoices, todayInvoices, allProducts, recentInvoices] = await Promise.all([
+    const [rangeInvoices, todayInvoices, allProducts, recentInvoices, openInvoices, openPurchases] = await Promise.all([
       // 1. Invoices in chosen range (exclude cancelled)
       prisma.invoice.findMany({
         where: {
@@ -138,6 +138,30 @@ router.get('/summary', async (req, res) => {
           },
         },
       }),
+
+      // 5. Open Invoices for receivables calculation (exclude cancelled)
+      prisma.invoice.findMany({
+        where: {
+          status: { not: 'CANCELLED' },
+          paymentStatus: { not: 'PAID' },
+        },
+        select: {
+          billAmount: true,
+          paidAmount: true,
+        },
+      }),
+
+      // 6. Open Purchases for payables calculation (exclude cancelled)
+      prisma.purchase.findMany({
+        where: {
+          status: { not: 'CANCELLED' },
+          paymentStatus: { not: 'PAID' },
+        },
+        select: {
+          totalAmount: true,
+          paidAmount: true,
+        },
+      }),
     ]);
 
     // Period sales amount & count
@@ -150,6 +174,24 @@ router.get('/summary', async (req, res) => {
     let todaySalesAmount = new Decimal(0);
     for (const inv of todayInvoices) {
       todaySalesAmount = todaySalesAmount.plus(new Decimal(inv.billAmount));
+    }
+
+    // Receivables calculation
+    let totalReceivables = new Decimal(0);
+    for (const inv of openInvoices) {
+      const due = new Decimal(inv.billAmount).minus(new Decimal(inv.paidAmount || 0));
+      if (due.greaterThan(0)) {
+        totalReceivables = totalReceivables.plus(due);
+      }
+    }
+
+    // Payables calculation
+    let totalPayables = new Decimal(0);
+    for (const pur of openPurchases) {
+      const due = new Decimal(pur.totalAmount).minus(new Decimal(pur.paidAmount || 0));
+      if (due.greaterThan(0)) {
+        totalPayables = totalPayables.plus(due);
+      }
     }
 
     // Live inventory valuation & individual product status
@@ -203,6 +245,12 @@ router.get('/summary', async (req, res) => {
         totalProductsCount: allProducts.length,
         lowStockCount: lowStockProducts.length,
       },
+      outstanding: {
+        totalReceivables: totalReceivables.toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toString(),
+        unpaidInvoicesCount: openInvoices.length,
+        totalPayables: totalPayables.toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toString(),
+        unpaidPurchasesCount: openPurchases.length,
+      },
       stockOverview,
       lowStockProducts,
       recentInvoices: recentInvoices.map((inv) => ({
@@ -212,6 +260,7 @@ router.get('/summary', async (req, res) => {
         customerName: inv.customer?.name || 'Walk-in Customer',
         customerMobile: inv.customer?.mobile || '',
         billAmount: inv.billAmount.toString(),
+        paidAmount: inv.paidAmount ? inv.paidAmount.toString() : '0',
         paymentStatus: inv.paymentStatus,
         status: inv.status || 'ACTIVE',
         cancellationReason: inv.cancellationReason,

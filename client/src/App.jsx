@@ -32,6 +32,19 @@ import {
   Users,
   Zap,
   Edit2,
+  Edit3,
+  History,
+  Wallet,
+  CreditCard,
+  Ban,
+  ArrowUpRight,
+  ArrowDownLeft,
+  Printer,
+  FileSpreadsheet,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
 } from "lucide-react";
 
 // Reference map of all 37 Indian GST State/UT codes
@@ -211,6 +224,119 @@ const getLogoSrc = (logoUrl) => {
   }
   return getApiUrl(logoUrl);
 };
+
+function TablePagination({
+  currentPage,
+  totalItems,
+  pageSize = 10,
+  onPageChange,
+  itemLabel = "items",
+}) {
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  if (totalItems === 0) return null;
+
+  const startIdx = (currentPage - 1) * pageSize + 1;
+  const endIdx = Math.min(totalItems, currentPage * pageSize);
+
+  if (totalItems <= pageSize && currentPage === 1) {
+    return (
+      <div className="pagination-container">
+        <div className="pagination-info">
+          Showing <strong>1</strong> to <strong>{totalItems}</strong> of{" "}
+          <strong>{totalItems}</strong> {itemLabel}
+        </div>
+      </div>
+    );
+  }
+
+  const getPageNumbers = () => {
+    const pages = [];
+    if (totalPages <= 7) {
+      for (let i = 1; i <= totalPages; i++) pages.push(i);
+    } else {
+      pages.push(1);
+      if (currentPage > 3) pages.push("ellipsis-1");
+
+      const start = Math.max(2, currentPage - 1);
+      const end = Math.min(totalPages - 1, currentPage + 1);
+      for (let i = start; i <= end; i++) {
+        if (!pages.includes(i)) pages.push(i);
+      }
+
+      if (currentPage < totalPages - 2) pages.push("ellipsis-2");
+      if (!pages.includes(totalPages)) pages.push(totalPages);
+    }
+    return pages;
+  };
+
+  return (
+    <div className="pagination-container">
+      <div className="pagination-info">
+        Showing <strong>{startIdx}</strong> to <strong>{endIdx}</strong> of{" "}
+        <strong>{totalItems}</strong> {itemLabel}
+      </div>
+      <div className="pagination-nav">
+        <button
+          type="button"
+          className="pagination-btn"
+          onClick={() => onPageChange(1)}
+          disabled={currentPage === 1}
+          title="First Page"
+        >
+          <ChevronsLeft size={14} />
+        </button>
+        <button
+          type="button"
+          className="pagination-btn"
+          onClick={() => onPageChange(currentPage - 1)}
+          disabled={currentPage === 1}
+          title="Previous Page"
+        >
+          <ChevronLeft size={14} />
+        </button>
+
+        {getPageNumbers().map((p, idx) => {
+          if (typeof p === "string" && p.startsWith("ellipsis")) {
+            return (
+              <span key={`ellipsis-${idx}`} className="pagination-ellipsis">
+                …
+              </span>
+            );
+          }
+          return (
+            <button
+              key={p}
+              type="button"
+              className={`pagination-btn ${p === currentPage ? "active" : ""}`}
+              onClick={() => onPageChange(p)}
+            >
+              {p}
+            </button>
+          );
+        })}
+
+        <button
+          type="button"
+          className="pagination-btn"
+          onClick={() => onPageChange(currentPage + 1)}
+          disabled={currentPage === totalPages}
+          title="Next Page"
+        >
+          <ChevronRight size={14} />
+        </button>
+        <button
+          type="button"
+          className="pagination-btn"
+          onClick={() => onPageChange(totalPages)}
+          disabled={currentPage === totalPages}
+          title="Last Page"
+        >
+          <ChevronsRight size={14} />
+        </button>
+      </div>
+    </div>
+  );
+}
 
 const CACHE_KEYS = {
   PRODUCTS: "prathna_cache_products",
@@ -481,6 +607,50 @@ export default function App() {
   const [cancelPurchaseReason, setCancelPurchaseReason] = useState("");
   const [cancellingPurchase, setCancellingPurchase] = useState(false);
 
+  // Purchase GST Inclusive Toggle (defaults to true)
+  const [purchaseIsInclusive, setPurchaseIsInclusive] = useState(true);
+
+  // Audited Invoice Edit State
+  const [editInvoiceModal, setEditInvoiceModal] = useState(null);
+  const [editInvoiceCustomerId, setEditInvoiceCustomerId] = useState("");
+  const [editInvoiceDate, setEditInvoiceDate] = useState("");
+  const [editInvoiceItems, setEditInvoiceItems] = useState([]);
+  const [editInvoiceReason, setEditInvoiceReason] = useState("");
+  const [savingInvoiceEdit, setSavingInvoiceEdit] = useState(false);
+
+  // Audited Purchase Edit State
+  const [editPurchaseModal, setEditPurchaseModal] = useState(null);
+  const [editPurchaseSupplierId, setEditPurchaseSupplierId] = useState("");
+  const [editPurchaseRefNumber, setEditPurchaseRefNumber] = useState("");
+  const [editPurchaseDate, setEditPurchaseDate] = useState("");
+  const [editPurchaseNotes, setEditPurchaseNotes] = useState("");
+  const [editPurchaseItems, setEditPurchaseItems] = useState([]);
+  const [editPurchaseReason, setEditPurchaseReason] = useState("");
+  const [savingPurchaseEdit, setSavingPurchaseEdit] = useState(false);
+
+  // Audit History Modal State
+  const [auditModal, setAuditModal] = useState(null); // { entityType, entity, logs, loading }
+
+  // Payment Recording & Voiding State
+  const [paymentModal, setPaymentModal] = useState(null); // { entityType: 'INVOICE' | 'PURCHASE', entity: object }
+  const [paymentForm, setPaymentForm] = useState({
+    amount: "",
+    paymentDate: getTodayDateString(),
+    paymentMethod: "CASH",
+    notes: "",
+  });
+  const [submittingPayment, setSubmittingPayment] = useState(false);
+  const [paymentFormError, setPaymentFormError] = useState("");
+
+  const [voidPaymentModal, setVoidPaymentModal] = useState(null); // { payment: object, entity: object, entityType: 'INVOICE' | 'PURCHASE' }
+  const [voidPaymentReason, setVoidPaymentReason] = useState("");
+  const [submittingVoid, setSubmittingVoid] = useState(false);
+
+  // Customer & Supplier Ledger Modals State
+  const [customerLedgerModal, setCustomerLedgerModal] = useState(null); // { customer: object, loading: boolean, data: object }
+  const [supplierLedgerModal, setSupplierLedgerModal] = useState(null); // { supplier: object, loading: boolean, data: object }
+  const [entityPayments, setEntityPayments] = useState({}); // { [entityKey]: Array }
+
   // Compute Top Selling Products (Max 4 for quick selection)
   const topSellingProducts = useMemo(() => {
     if (!products || products.length === 0) return [];
@@ -529,6 +699,17 @@ export default function App() {
   const [expandedPurchaseId, setExpandedPurchaseId] = useState(null);
   const [expandedReportPurchaseId, setExpandedReportPurchaseId] = useState(null);
   const [invoiceHistoryStatusFilter, setInvoiceHistoryStatusFilter] = useState("all");
+
+  // Pagination & Filter States (10 items per page)
+  const [invoicePage, setInvoicePage] = useState(1);
+  const [quickInvoicePage, setQuickInvoicePage] = useState(1);
+  const [purchasePage, setPurchasePage] = useState(1);
+  const [purchaseSearchQuery, setPurchaseSearchQuery] = useState("");
+  const [purchaseHistoryStatusFilter, setPurchaseHistoryStatusFilter] = useState("all");
+  const [customerPage, setCustomerPage] = useState(1);
+  const [customerTableSearch, setCustomerTableSearch] = useState("");
+  const [supplierPage, setSupplierPage] = useState(1);
+  const [supplierTableSearch, setSupplierTableSearch] = useState("");
 
   // Sales Return Modal State
   const [returnModalInvoice, setReturnModalInvoice] = useState(null);
@@ -1369,9 +1550,22 @@ export default function App() {
     }
 
     const gstRate = Number(prod.gstRate);
-    const taxable = Number((qty * rate).toFixed(2));
-    const gstAmt = Number(((taxable * gstRate) / 100).toFixed(2));
-    const total = Number((taxable + gstAmt).toFixed(2));
+    let taxable, gstAmt, total, unitTaxable;
+
+    if (purchaseIsInclusive) {
+      // GST-inclusive: entered rate includes GST
+      const factor = 1 + gstRate / 100;
+      unitTaxable = Number((rate / factor).toFixed(6));
+      taxable = Number((qty * unitTaxable).toFixed(2));
+      total = Number((qty * rate).toFixed(2));
+      gstAmt = Number((total - taxable).toFixed(2));
+    } else {
+      // GST-exclusive: GST is calculated on top
+      taxable = Number((qty * rate).toFixed(2));
+      gstAmt = Number(((taxable * gstRate) / 100).toFixed(2));
+      total = Number((taxable + gstAmt).toFixed(2));
+      unitTaxable = rate;
+    }
 
     setPurchaseItems([
       ...purchaseItems,
@@ -1382,6 +1576,8 @@ export default function App() {
         qty,
         rate,
         gstRate,
+        isInclusive: purchaseIsInclusive,
+        unitTaxable,
         taxable,
         gstAmt,
         total,
@@ -1418,6 +1614,7 @@ export default function App() {
           qty: item.qty,
           rate: item.rate,
           gstRate: item.gstRate,
+          isInclusive: item.isInclusive !== undefined ? item.isInclusive : true,
         })),
       };
 
@@ -1485,6 +1682,188 @@ export default function App() {
       setCancellingPurchase(false);
     }
   };
+
+  // --- Handlers: Audited Edit for Invoice ---
+  const openEditInvoiceModal = async (invoice) => {
+    try {
+      const res = await authFetch(`/invoices/${invoice.id}`);
+      const fresh = await res.json();
+      if (!res.ok) throw new Error(fresh.error || "Failed to load invoice details");
+
+      setEditInvoiceModal(fresh);
+      setEditInvoiceCustomerId(fresh.customerId);
+      setEditInvoiceDate(
+        fresh.invoiceDate
+          ? new Date(fresh.invoiceDate).toISOString().split("T")[0]
+          : new Date().toISOString().split("T")[0]
+      );
+      setEditInvoiceItems(
+        (fresh.items || []).map((it) => ({
+          id: it.id,
+          productId: it.productId,
+          name: it.descriptionSnapshot || it.product?.name,
+          hsnCode: it.hsnSnapshot || it.product?.hsnCode,
+          gstRate: Number(it.gstRateSnapshot || it.product?.gstRate || 0),
+          sellingPrice: Number(it.rate),
+          qty: Number(it.qty),
+          unit: it.product?.unit || "PCS",
+        }))
+      );
+      setEditInvoiceReason("");
+    } catch (err) {
+      showToast(err.message, "error");
+    }
+  };
+
+  const handleSaveInvoiceEdit = async (e) => {
+    e.preventDefault();
+    if (!editInvoiceModal) return;
+    if (!editInvoiceReason.trim()) {
+      showToast("Please provide a reason for editing the invoice", "error");
+      return;
+    }
+    if (editInvoiceItems.length === 0) {
+      showToast("Invoice must contain at least one item", "error");
+      return;
+    }
+
+    setSavingInvoiceEdit(true);
+    try {
+      const payload = {
+        reason: editInvoiceReason.trim(),
+        customerId: editInvoiceCustomerId,
+        invoiceDate: editInvoiceDate,
+        items: editInvoiceItems.map((it) => ({
+          productId: it.productId,
+          qty: it.qty,
+          rate: it.sellingPrice,
+        })),
+      };
+
+      const res = await authFetch(`/invoices/${editInvoiceModal.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to update invoice");
+
+      showToast(`Invoice ${data.invoiceNumber} updated and stock adjusted!`, "success");
+      setEditInvoiceModal(null);
+      setEditInvoiceReason("");
+      await loadData();
+      if (activeTab === "reports") {
+        loadReport();
+      }
+    } catch (err) {
+      showToast(err.message, "error");
+    } finally {
+      setSavingInvoiceEdit(false);
+    }
+  };
+
+  // --- Handlers: Audited Edit for Purchase ---
+  const openEditPurchaseModal = async (purchase) => {
+    try {
+      const res = await authFetch(`/purchases/${purchase.id}`);
+      const fresh = await res.json();
+      if (!res.ok) throw new Error(fresh.error || "Failed to load purchase details");
+
+      setEditPurchaseModal(fresh);
+      setEditPurchaseSupplierId(fresh.supplierId);
+      setEditPurchaseRefNumber(fresh.referenceNumber);
+      setEditPurchaseDate(
+        fresh.purchaseDate
+          ? new Date(fresh.purchaseDate).toISOString().split("T")[0]
+          : new Date().toISOString().split("T")[0]
+      );
+      setEditPurchaseNotes(fresh.notes || "");
+      setEditPurchaseItems(
+        (fresh.items || []).map((it) => ({
+          id: it.id,
+          productId: it.productId,
+          name: it.product?.name,
+          hsnCode: it.product?.hsnCode,
+          qty: Number(it.qty),
+          rate: Number(it.rate),
+          gstRate: Number(it.gstRate),
+          isInclusive: it.isInclusive !== undefined ? it.isInclusive : true,
+        }))
+      );
+      setEditPurchaseReason("");
+    } catch (err) {
+      showToast(err.message, "error");
+    }
+  };
+
+  const handleSavePurchaseEdit = async (e) => {
+    e.preventDefault();
+    if (!editPurchaseModal) return;
+    if (!editPurchaseReason.trim()) {
+      showToast("Please provide a reason for editing the purchase", "error");
+      return;
+    }
+    if (editPurchaseItems.length === 0) {
+      showToast("Purchase must contain at least one item", "error");
+      return;
+    }
+
+    setSavingPurchaseEdit(true);
+    try {
+      const payload = {
+        reason: editPurchaseReason.trim(),
+        supplierId: editPurchaseSupplierId,
+        referenceNumber: editPurchaseRefNumber.trim(),
+        purchaseDate: editPurchaseDate,
+        notes: editPurchaseNotes.trim(),
+        items: editPurchaseItems.map((it) => ({
+          productId: it.productId,
+          qty: it.qty,
+          rate: it.rate,
+          gstRate: it.gstRate,
+          isInclusive: it.isInclusive !== undefined ? it.isInclusive : true,
+        })),
+      };
+
+      const res = await authFetch(`/purchases/${editPurchaseModal.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to update purchase");
+
+      showToast(`Purchase "${data.referenceNumber}" updated successfully!`, "success");
+      setEditPurchaseModal(null);
+      setEditPurchaseReason("");
+      await loadData();
+      if (activeTab === "reports") {
+        loadReport();
+      }
+    } catch (err) {
+      showToast(err.message, "error");
+    } finally {
+      setSavingPurchaseEdit(false);
+    }
+  };
+
+  // --- Handlers: Audit History Log Viewer ---
+  const openAuditHistoryModal = async (entityType, entity) => {
+    setAuditModal({ entityType, entity, logs: [], loading: true });
+    try {
+      const endpoint = entityType === "INVOICE" ? `/invoices/${entity.id}/edits` : `/purchases/${entity.id}/edits`;
+      const res = await authFetch(endpoint);
+      const logs = await res.json();
+      if (!res.ok) throw new Error(logs.error || "Failed to load audit history");
+      setAuditModal({ entityType, entity, logs: Array.isArray(logs) ? logs : [], loading: false });
+    } catch (err) {
+      showToast(err.message, "error");
+      setAuditModal(null);
+    }
+  };
+
 
   // --- Handlers: Settings ---
   const handleSaveSettings = async (e) => {
@@ -1880,6 +2259,8 @@ export default function App() {
 
   const handleSearchInvoices = async (e) => {
     if (e) e.preventDefault();
+    setInvoicePage(1);
+    setQuickInvoicePage(1);
     const q = invoiceSearchQuery.trim();
     if (!q) {
       setSearchedInvoices(null);
@@ -1905,6 +2286,171 @@ export default function App() {
   const handleClearInvoiceSearch = () => {
     setInvoiceSearchQuery("");
     setSearchedInvoices(null);
+    setInvoicePage(1);
+    setQuickInvoicePage(1);
+  };
+
+  // --- Handlers: Payments & Ledger ---
+  const loadEntityPayments = async (entityType, entityId) => {
+    try {
+      const endpoint = entityType === "INVOICE" ? `/invoices/${entityId}/payments` : `/purchases/${entityId}/payments`;
+      const res = await authFetch(endpoint);
+      const data = await res.json();
+      if (res.ok) {
+        setEntityPayments((prev) => ({
+          ...prev,
+          [`${entityType}_${entityId}`]: Array.isArray(data) ? data : [],
+        }));
+      }
+    } catch (err) {
+      console.error(`Failed to load payments for ${entityType} ${entityId}:`, err);
+    }
+  };
+
+  const openPaymentModal = (entityType, entity) => {
+    const total = entityType === "INVOICE" ? Number(entity.billAmount || 0) : Number(entity.totalAmount || 0);
+    const paid = Number(entity.paidAmount || 0);
+    const remaining = Math.max(0, total - paid);
+
+    setPaymentModal({ entityType, entity });
+    setPaymentForm({
+      amount: remaining > 0 ? String(remaining.toFixed(2)) : "",
+      paymentDate: getTodayDateString(),
+      paymentMethod: entity.paymentMethod && entity.paymentMethod !== "CREDIT" ? entity.paymentMethod : "CASH",
+      notes: "",
+    });
+    setPaymentFormError("");
+  };
+
+  const handleSubmitPayment = async (e) => {
+    e.preventDefault();
+    if (!paymentModal) return;
+
+    const amt = parseFloat(paymentForm.amount);
+    if (isNaN(amt) || amt <= 0) {
+      setPaymentFormError("Please enter a valid positive payment amount");
+      return;
+    }
+
+    const total = paymentModal.entityType === "INVOICE" ? Number(paymentModal.entity.billAmount || 0) : Number(paymentModal.entity.totalAmount || 0);
+    const paid = Number(paymentModal.entity.paidAmount || 0);
+    const remaining = Number((total - paid).toFixed(2));
+
+    if (amt > remaining) {
+      setPaymentFormError(`Payment amount (₹${amt}) cannot exceed remaining balance (₹${remaining})`);
+      return;
+    }
+
+    setSubmittingPayment(true);
+    setPaymentFormError("");
+
+    try {
+      const endpoint = paymentModal.entityType === "INVOICE"
+        ? `/invoices/${paymentModal.entity.id}/payments`
+        : `/purchases/${paymentModal.entity.id}/payments`;
+
+      const res = await authFetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          amount: amt,
+          paymentDate: paymentForm.paymentDate,
+          paymentMethod: paymentForm.paymentMethod,
+          notes: paymentForm.notes.trim() || undefined,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to record payment");
+
+      showToast(`Payment of ₹${amt.toFixed(2)} recorded successfully!`, "success");
+      setPaymentModal(null);
+      await loadData();
+      await loadDashboardSummary();
+      loadEntityPayments(paymentModal.entityType, paymentModal.entity.id);
+
+      // If customer or supplier ledger modal is open, refresh it
+      if (customerLedgerModal?.customer) {
+        openCustomerLedger(customerLedgerModal.customer);
+      }
+      if (supplierLedgerModal?.supplier) {
+        openSupplierLedger(supplierLedgerModal.supplier);
+      }
+    } catch (err) {
+      setPaymentFormError(err.message);
+    } finally {
+      setSubmittingPayment(false);
+    }
+  };
+
+  const openVoidPaymentModal = (payment, entity, entityType) => {
+    setVoidPaymentModal({ payment, entity, entityType });
+    setVoidPaymentReason("");
+  };
+
+  const handleVoidPayment = async (e) => {
+    e.preventDefault();
+    if (!voidPaymentModal) return;
+
+    if (!voidPaymentReason.trim()) {
+      showToast("Please provide a reason to void this payment", "error");
+      return;
+    }
+
+    setSubmittingVoid(true);
+    try {
+      const res = await authFetch(`/payments/${voidPaymentModal.payment.id}/void`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: voidPaymentReason.trim() }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to void payment");
+
+      showToast("Payment voided successfully. Balance recalculated.", "success");
+      setVoidPaymentModal(null);
+      await loadData();
+      await loadDashboardSummary();
+      loadEntityPayments(voidPaymentModal.entityType, voidPaymentModal.entity.id);
+
+      if (customerLedgerModal?.customer) {
+        openCustomerLedger(customerLedgerModal.customer);
+      }
+      if (supplierLedgerModal?.supplier) {
+        openSupplierLedger(supplierLedgerModal.supplier);
+      }
+    } catch (err) {
+      showToast(err.message, "error");
+    } finally {
+      setSubmittingVoid(false);
+    }
+  };
+
+  const openCustomerLedger = async (customer) => {
+    setCustomerLedgerModal({ customer, loading: true, data: null });
+    try {
+      const res = await authFetch(`/customers/${customer.id}/ledger`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to load customer ledger");
+      setCustomerLedgerModal({ customer, loading: false, data });
+    } catch (err) {
+      showToast(err.message, "error");
+      setCustomerLedgerModal(null);
+    }
+  };
+
+  const openSupplierLedger = async (supplier) => {
+    setSupplierLedgerModal({ supplier, loading: true, data: null });
+    try {
+      const res = await authFetch(`/suppliers/${supplier.id}/ledger`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to load supplier ledger");
+      setSupplierLedgerModal({ supplier, loading: false, data });
+    } catch (err) {
+      showToast(err.message, "error");
+      setSupplierLedgerModal(null);
+    }
   };
 
   // =========================================================================
@@ -2644,6 +3190,64 @@ export default function App() {
                       {dashboardSummary?.stockSummary?.totalProductsCount ||
                         products.length}{" "}
                       catalog items
+                    </div>
+                  </div>
+
+                  {/* Card 4: Outstanding Receivables (Customer Dues) */}
+                  <div
+                    className="kpi-card"
+                    style={{ cursor: "pointer" }}
+                    onClick={() => handleNavClick("customer")}
+                    title="Click to view customers & ledgers"
+                  >
+                    <div className="kpi-label">
+                      <span>Customer Receivables</span>
+                      <ArrowDownLeft
+                        size={16}
+                        style={{ color: "#d97706" }}
+                      />
+                    </div>
+                    <div
+                      className="kpi-value"
+                      style={{ color: "#d97706" }}
+                    >
+                      ₹
+                      {Number(
+                        dashboardSummary?.outstanding?.totalReceivables || 0,
+                      ).toLocaleString("en-IN")}
+                    </div>
+                    <div className="kpi-hint">
+                      {dashboardSummary?.outstanding?.unpaidInvoicesCount || 0}{" "}
+                      unsettled customer bill(s)
+                    </div>
+                  </div>
+
+                  {/* Card 5: Outstanding Payables (Supplier Dues) */}
+                  <div
+                    className="kpi-card"
+                    style={{ cursor: "pointer" }}
+                    onClick={() => handleNavClick("supplier")}
+                    title="Click to view suppliers & payables"
+                  >
+                    <div className="kpi-label">
+                      <span>Supplier Payables</span>
+                      <ArrowUpRight
+                        size={16}
+                        style={{ color: "#dc2626" }}
+                      />
+                    </div>
+                    <div
+                      className="kpi-value"
+                      style={{ color: "#dc2626" }}
+                    >
+                      ₹
+                      {Number(
+                        dashboardSummary?.outstanding?.totalPayables || 0,
+                      ).toLocaleString("en-IN")}
+                    </div>
+                    <div className="kpi-hint">
+                      {dashboardSummary?.outstanding?.unpaidPurchasesCount || 0}{" "}
+                      unsettled supplier order(s)
                     </div>
                   </div>
                 </div>
@@ -4432,8 +5036,12 @@ export default function App() {
                         const quickInvoices = (!invoiceSearchQuery.trim() && searchedInvoices === null)
                           ? displayedInvoices.filter((inv) => inv.status !== "CANCELLED")
                           : displayedInvoices;
+                        const totalQuickPages = Math.max(1, Math.ceil(quickInvoices.length / 10));
+                        const safeQuickPage = Math.min(quickInvoicePage, totalQuickPages);
+                        const paginatedQuickInvoices = quickInvoices.slice((safeQuickPage - 1) * 10, safeQuickPage * 10);
 
                         return quickInvoices.length > 0 ? (
+                        <div>
                         <div className="table-container">
                           <table className="data-table">
                             <thead>
@@ -4447,7 +5055,7 @@ export default function App() {
                               </tr>
                             </thead>
                             <tbody>
-                              {quickInvoices.slice(0, 5).map((inv) => (
+                              {paginatedQuickInvoices.map((inv) => (
                                 <React.Fragment key={inv.id}>
                                   <tr style={inv.status === "CANCELLED" ? { opacity: 0.75 } : undefined}>
                                     <td style={{ fontWeight: 600 }}>
@@ -4532,6 +5140,29 @@ export default function App() {
                                           title="Download PDF"
                                         >
                                           <Download size={13} /> PDF
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="btn btn-secondary btn-sm"
+                                          onClick={() => openEditInvoiceModal(inv)}
+                                          disabled={inv.status === "CANCELLED" || (inv.returns && inv.returns.length > 0)}
+                                          title={
+                                            inv.status === "CANCELLED"
+                                              ? "Cannot edit cancelled invoice"
+                                              : inv.returns && inv.returns.length > 0
+                                              ? "Cannot edit invoice with returns"
+                                              : "Edit invoice customer or items"
+                                          }
+                                        >
+                                          <Edit3 size={13} /> Edit
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="btn btn-secondary btn-sm"
+                                          onClick={() => openAuditHistoryModal("INVOICE", inv)}
+                                          title="View Edit Audit History"
+                                        >
+                                          <History size={13} /> Audit
                                         </button>
                                         {inv.status === "CANCELLED" ? (
                                           <button
@@ -4641,6 +5272,14 @@ export default function App() {
                             </tbody>
                           </table>
                         </div>
+                        <TablePagination
+                          currentPage={safeQuickPage}
+                          totalItems={quickInvoices.length}
+                          pageSize={10}
+                          onPageChange={setQuickInvoicePage}
+                          itemLabel="invoices"
+                        />
+                        </div>
                       ) : (
                         <div
                           className="empty-state"
@@ -4667,6 +5306,10 @@ export default function App() {
                     if (invoiceHistoryStatusFilter === "cancelled") return inv.status === "CANCELLED";
                     return true;
                   });
+
+                  const totalInvoicePages = Math.max(1, Math.ceil(filteredHistoryInvoices.length / 10));
+                  const safeInvoicePage = Math.min(invoicePage, totalInvoicePages);
+                  const paginatedInvoices = filteredHistoryInvoices.slice((safeInvoicePage - 1) * 10, safeInvoicePage * 10);
 
                   return (
                   <div>
@@ -4714,6 +5357,7 @@ export default function App() {
                             value={invoiceSearchQuery}
                             onChange={(e) => {
                               setInvoiceSearchQuery(e.target.value);
+                              setInvoicePage(1);
                               if (!e.target.value.trim())
                                 setSearchedInvoices(null);
                             }}
@@ -4777,7 +5421,7 @@ export default function App() {
                             <button
                               type="button"
                               className={`btn btn-sm ${invoiceHistoryStatusFilter === "all" ? "btn-primary" : "btn-secondary"}`}
-                              onClick={() => setInvoiceHistoryStatusFilter("all")}
+                              onClick={() => { setInvoiceHistoryStatusFilter("all"); setInvoicePage(1); }}
                               style={{ fontSize: "0.75rem", padding: "3px 10px" }}
                             >
                               All Invoices ({displayedInvoices.length})
@@ -4785,7 +5429,7 @@ export default function App() {
                             <button
                               type="button"
                               className={`btn btn-sm ${invoiceHistoryStatusFilter === "active" ? "btn-primary" : "btn-secondary"}`}
-                              onClick={() => setInvoiceHistoryStatusFilter("active")}
+                              onClick={() => { setInvoiceHistoryStatusFilter("active"); setInvoicePage(1); }}
                               style={{ fontSize: "0.75rem", padding: "3px 10px" }}
                             >
                               Active ({activeCount})
@@ -4793,7 +5437,7 @@ export default function App() {
                             <button
                               type="button"
                               className={`btn btn-sm ${invoiceHistoryStatusFilter === "cancelled" ? "btn-primary" : "btn-secondary"}`}
-                              onClick={() => setInvoiceHistoryStatusFilter("cancelled")}
+                              onClick={() => { setInvoiceHistoryStatusFilter("cancelled"); setInvoicePage(1); }}
                               style={{ fontSize: "0.75rem", padding: "3px 10px" }}
                             >
                               Cancelled ({cancelledCount})
@@ -4809,6 +5453,7 @@ export default function App() {
                       </div>
 
                       {filteredHistoryInvoices.length > 0 ? (
+                        <div>
                         <div className="table-container">
                           <table className="data-table">
                             <thead>
@@ -4826,7 +5471,7 @@ export default function App() {
                               </tr>
                             </thead>
                             <tbody>
-                              {filteredHistoryInvoices.map((inv) => {
+                              {paginatedInvoices.map((inv) => {
                                 const isExpanded = expandedInvoiceId === inv.id;
                                 const isInterstate =
                                   inv.taxType === "INTERSTATE";
@@ -4911,9 +5556,18 @@ export default function App() {
                                           >
                                             CANCELLED
                                           </span>
+                                        ) : inv.paymentStatus === "PAID" ? (
+                                          <span className="badge badge-paid">PAID</span>
+                                        ) : inv.paymentStatus === "PARTIAL" ? (
+                                          <span
+                                            className="badge badge-partial"
+                                            title={`Paid: ₹${Number(inv.paidAmount || 0).toFixed(2)} / Total: ₹${Number(inv.billAmount).toFixed(2)}`}
+                                          >
+                                            PARTIAL (Due ₹{(Number(inv.billAmount) - Number(inv.paidAmount || 0)).toFixed(2)})
+                                          </span>
                                         ) : (
-                                          <span className="badge badge-success">
-                                            {inv.paymentStatus || "PAID"}
+                                          <span className="badge badge-unpaid">
+                                            UNPAID
                                           </span>
                                         )}
                                         {inv.returns &&
@@ -4933,11 +5587,13 @@ export default function App() {
                                         <button
                                           type="button"
                                           className="btn btn-secondary btn-sm"
-                                          onClick={() =>
-                                            setExpandedInvoiceId(
-                                              isExpanded ? null : inv.id,
-                                            )
-                                          }
+                                          onClick={() => {
+                                            const next = isExpanded ? null : inv.id;
+                                            setExpandedInvoiceId(next);
+                                            if (next) {
+                                              loadEntityPayments("INVOICE", inv.id);
+                                            }
+                                          }}
                                           style={{
                                             fontSize: "0.75rem",
                                             padding: "4px 10px",
@@ -4957,6 +5613,17 @@ export default function App() {
                                             alignItems: "center",
                                           }}
                                         >
+                                          {inv.status !== "CANCELLED" && inv.paymentStatus !== "PAID" && (
+                                            <button
+                                              type="button"
+                                              className="btn btn-secondary btn-sm"
+                                              style={{ color: "var(--primary)", borderColor: "var(--primary)", fontWeight: 600 }}
+                                              onClick={() => openPaymentModal("INVOICE", inv)}
+                                              title="Record payment against this invoice"
+                                            >
+                                              <Wallet size={13} /> + Pay
+                                            </button>
+                                          )}
                                           <select
                                             className="form-select"
                                             style={{
@@ -4993,6 +5660,29 @@ export default function App() {
                                             title="Download PDF Invoice"
                                           >
                                             <Download size={13} /> PDF
+                                          </button>
+                                          <button
+                                            type="button"
+                                            className="btn btn-secondary btn-sm"
+                                            onClick={() => openEditInvoiceModal(inv)}
+                                            disabled={inv.status === "CANCELLED" || (inv.returns && inv.returns.length > 0)}
+                                            title={
+                                              inv.status === "CANCELLED"
+                                                ? "Cannot edit cancelled invoice"
+                                                : inv.returns && inv.returns.length > 0
+                                                ? "Cannot edit invoice with returns"
+                                                : "Edit invoice customer or items"
+                                            }
+                                          >
+                                            <Edit3 size={13} /> Edit
+                                          </button>
+                                          <button
+                                            type="button"
+                                            className="btn btn-secondary btn-sm"
+                                            onClick={() => openAuditHistoryModal("INVOICE", inv)}
+                                            title="View Edit Audit History"
+                                          >
+                                            <History size={13} /> Audit
                                           </button>
                                           {inv.status === "CANCELLED" ? (
                                             <button
@@ -5048,6 +5738,8 @@ export default function App() {
                                               justifyContent: "space-between",
                                               alignItems: "center",
                                               marginBottom: "10px",
+                                              flexWrap: "wrap",
+                                              gap: "8px",
                                             }}
                                           >
                                             <div
@@ -5208,6 +5900,85 @@ export default function App() {
                                                 ))}
                                               </div>
                                             )}
+
+                                          {/* Payment History Breakdown */}
+                                          <div className="payment-history-box" style={{ marginTop: "14px" }}>
+                                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px", flexWrap: "wrap", gap: "8px" }}>
+                                              <div style={{ fontWeight: 600, fontSize: "0.875rem", display: "flex", alignItems: "center", gap: "6px" }}>
+                                                <Wallet size={15} style={{ color: "var(--primary)" }} />
+                                                <span>Payment History</span>
+                                                <span style={{ fontSize: "0.8125rem", color: "var(--text-secondary)", fontWeight: 400 }}>
+                                                  (Paid: <strong>₹{Number(inv.paidAmount || 0).toFixed(2)}</strong> / Bill: <strong>₹{Number(inv.billAmount).toFixed(2)}</strong>)
+                                                </span>
+                                              </div>
+                                              {inv.status !== "CANCELLED" && inv.paymentStatus !== "PAID" && (
+                                                <button
+                                                  type="button"
+                                                  className="btn btn-primary btn-sm"
+                                                  style={{ fontSize: "0.75rem", padding: "3px 8px", height: "26px" }}
+                                                  onClick={() => openPaymentModal("INVOICE", inv)}
+                                                >
+                                                  <Plus size={12} /> Record Payment
+                                                </button>
+                                              )}
+                                            </div>
+
+                                            {entityPayments[`INVOICE_${inv.id}`] && entityPayments[`INVOICE_${inv.id}`].length > 0 ? (
+                                              <table className="data-table" style={{ fontSize: "0.8125rem", background: "#ffffff" }}>
+                                                <thead>
+                                                  <tr>
+                                                    <th>Date</th>
+                                                    <th>Method</th>
+                                                    <th>Notes</th>
+                                                    <th style={{ textAlign: "right" }}>Amount</th>
+                                                    <th>Status</th>
+                                                    <th style={{ textAlign: "right" }}>Action</th>
+                                                  </tr>
+                                                </thead>
+                                                <tbody>
+                                                  {entityPayments[`INVOICE_${inv.id}`].map((pmt) => {
+                                                    const isVoided = pmt.status === "VOIDED";
+                                                    return (
+                                                      <tr key={pmt.id} style={isVoided ? { opacity: 0.6 } : undefined}>
+                                                        <td>{new Date(pmt.paymentDate || pmt.createdAt).toLocaleDateString("en-IN")}</td>
+                                                        <td>
+                                                          <span className="badge badge-neutral">{pmt.paymentMethod}</span>
+                                                        </td>
+                                                        <td>{pmt.notes || "—"}</td>
+                                                        <td style={{ textAlign: "right", fontWeight: 600, textDecoration: isVoided ? "line-through" : "none" }}>
+                                                          ₹{Number(pmt.amount).toFixed(2)}
+                                                        </td>
+                                                        <td>
+                                                          {isVoided ? (
+                                                            <span className="badge badge-voided" title={`Void Reason: ${pmt.voidReason || 'N/A'}`}>VOIDED</span>
+                                                          ) : (
+                                                            <span className="badge badge-paid">ACTIVE</span>
+                                                          )}
+                                                        </td>
+                                                        <td style={{ textAlign: "right" }}>
+                                                          {!isVoided && inv.status !== "CANCELLED" && (
+                                                            <button
+                                                              type="button"
+                                                              className="btn btn-secondary btn-sm"
+                                                              style={{ padding: "2px 6px", fontSize: "0.7rem", color: "var(--status-danger)", height: "24px" }}
+                                                              onClick={() => openVoidPaymentModal(pmt, inv, "INVOICE")}
+                                                              title="Void this payment with reason"
+                                                            >
+                                                              <Ban size={12} /> Void
+                                                            </button>
+                                                          )}
+                                                        </td>
+                                                      </tr>
+                                                    );
+                                                  })}
+                                                </tbody>
+                                              </table>
+                                            ) : (
+                                              <div style={{ fontSize: "0.8125rem", color: "var(--text-secondary)", padding: "6px 0" }}>
+                                                {inv.paymentStatus === "UNPAID" ? "No payments recorded yet against this invoice." : "Loading payments..."}
+                                              </div>
+                                            )}
+                                          </div>
                                         </td>
                                       </tr>
                                     )}
@@ -5216,6 +5987,14 @@ export default function App() {
                               })}
                             </tbody>
                           </table>
+                        </div>
+                        <TablePagination
+                          currentPage={safeInvoicePage}
+                          totalItems={filteredHistoryInvoices.length}
+                          pageSize={10}
+                          onPageChange={setInvoicePage}
+                          itemLabel="invoices"
+                        />
                         </div>
                       ) : (
                         <div className="empty-state">
@@ -5536,13 +6315,49 @@ export default function App() {
               >
                 <div
                   style={{
-                    fontWeight: 600,
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
                     marginBottom: "12px",
-                    fontSize: "0.9375rem",
+                    flexWrap: "wrap",
+                    gap: "8px",
                   }}
                 >
-                  Add Product to Purchase Order
+                  <div
+                    style={{
+                      fontWeight: 600,
+                      fontSize: "0.9375rem",
+                    }}
+                  >
+                    Add Product to Purchase Order
+                  </div>
+
+                  {/* GST Inclusive / Exclusive Toggle */}
+                  <label
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                      cursor: "pointer",
+                      fontSize: "0.8125rem",
+                      fontWeight: 500,
+                      color: purchaseIsInclusive ? "var(--primary)" : "var(--text-secondary)",
+                      background: purchaseIsInclusive ? "rgba(99, 102, 241, 0.08)" : "var(--bg-subtle)",
+                      padding: "4px 10px",
+                      borderRadius: "6px",
+                      border: "1px solid var(--border)",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={purchaseIsInclusive}
+                      onChange={(e) => setPurchaseIsInclusive(e.target.checked)}
+                      style={{ cursor: "pointer", accentColor: "var(--primary)" }}
+                    />
+                    <span>Rate includes GST (Default)</span>
+                  </label>
                 </div>
+
                 <div className="item-input-grid">
                   <div>
                     <label
@@ -5590,14 +6405,14 @@ export default function App() {
                       className="form-label"
                       style={{ fontSize: "0.8125rem" }}
                     >
-                      Purchase Rate (₹)
+                      {purchaseIsInclusive ? "Rate (GST-Inclusive ₹)" : "Rate (Excl. GST ₹)"}
                     </label>
                     <input
                       type="number"
                       min="0"
                       step="0.01"
                       className="form-input"
-                      placeholder="Cost / unit"
+                      placeholder={purchaseIsInclusive ? "Total rate per unit (₹)" : "Taxable rate (₹)"}
                       value={purchaseRate}
                       onChange={(e) => setPurchaseRate(e.target.value)}
                     />
@@ -5613,12 +6428,51 @@ export default function App() {
                     </button>
                   </div>
                 </div>
+
+                {/* Live calculation helper snippet */}
+                {purchaseProdId && purchaseRate && (
+                  (() => {
+                    const prod = products.find((p) => p.id === purchaseProdId);
+                    if (!prod) return null;
+                    const r = parseFloat(purchaseRate) || 0;
+                    const q = parseFloat(purchaseQty) || 1;
+                    const gst = Number(prod.gstRate);
+                    let taxVal, gstVal, totVal;
+                    if (purchaseIsInclusive) {
+                      const uTax = r / (1 + gst / 100);
+                      taxVal = q * uTax;
+                      totVal = q * r;
+                      gstVal = totVal - taxVal;
+                    } else {
+                      taxVal = q * r;
+                      gstVal = taxVal * (gst / 100);
+                      totVal = taxVal + gstVal;
+                    }
+                    return (
+                      <div
+                        style={{
+                          marginTop: "10px",
+                          fontSize: "0.75rem",
+                          color: "var(--text-secondary)",
+                          display: "flex",
+                          gap: "14px",
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <span>Taxable Value: <strong>₹{taxVal.toFixed(2)}</strong></span>
+                        <span>GST ({gst}%): <strong>₹{gstVal.toFixed(2)}</strong></span>
+                        <span>Line Total: <strong style={{ color: "var(--primary)" }}>₹{totVal.toFixed(2)}</strong></span>
+                        <span style={{ color: "var(--text-muted)" }}>({purchaseIsInclusive ? "GST-Inclusive" : "GST-Exclusive"})</span>
+                      </div>
+                    );
+                  })()
+                )}
               </div>
 
               {/* Purchase Items Table */}
               <div style={{ marginBottom: "20px" }}>
                 <div style={{ fontWeight: 600, marginBottom: "8px" }}>
-                  Items to Restock
+                  Items to Restock ({purchaseItems.length})
                 </div>
                 {/* Line Items List */}
                 {purchaseItems.length > 0 ? (
@@ -5632,8 +6486,10 @@ export default function App() {
                           <th>Item</th>
                           <th style={{ textAlign: "right" }}>Qty</th>
                           <th style={{ textAlign: "right" }}>Rate (₹)</th>
-                          <th style={{ textAlign: "right" }}>GST Rate</th>
-                          <th style={{ textAlign: "right" }}>Total</th>
+                          <th style={{ textAlign: "center" }}>Tax Mode</th>
+                          <th style={{ textAlign: "right" }}>Taxable (₹)</th>
+                          <th style={{ textAlign: "right" }}>GST Amt (₹)</th>
+                          <th style={{ textAlign: "right" }}>Total (₹)</th>
                           <th style={{ textAlign: "center" }}>Remove</th>
                         </tr>
                       </thead>
@@ -5641,22 +6497,28 @@ export default function App() {
                         {purchaseItems.map((item, idx) => (
                           <tr key={idx}>
                             <td style={{ fontWeight: 600 }}>
-                              {item.productName}
+                              {item.name || item.productName}
                             </td>
                             <td style={{ textAlign: "right" }}>{item.qty}</td>
                             <td style={{ textAlign: "right" }}>
                               ₹{Number(item.rate).toFixed(2)}
                             </td>
+                            <td style={{ textAlign: "center" }}>
+                              <span
+                                className={`badge ${item.isInclusive ? "badge-primary" : "badge-secondary"}`}
+                                style={{ fontSize: "0.7rem" }}
+                              >
+                                {item.isInclusive ? "GST-Incl" : "GST-Excl"} ({item.gstRate}%)
+                              </span>
+                            </td>
                             <td style={{ textAlign: "right" }}>
-                              {item.gstRate}%
+                              ₹{Number(item.taxable || 0).toFixed(2)}
+                            </td>
+                            <td style={{ textAlign: "right" }}>
+                              ₹{Number(item.gstAmt || 0).toFixed(2)}
                             </td>
                             <td style={{ textAlign: "right", fontWeight: 600 }}>
-                              ₹
-                              {(
-                                Number(item.qty) *
-                                Number(item.rate) *
-                                (1 + Number(item.gstRate) / 100)
-                              ).toFixed(2)}
+                              ₹{Number(item.total || 0).toFixed(2)}
                             </td>
                             <td style={{ textAlign: "center" }}>
                               <button
@@ -5678,6 +6540,20 @@ export default function App() {
                           </tr>
                         ))}
                       </tbody>
+                      <tfoot>
+                        <tr style={{ fontWeight: 700, background: "var(--bg-subtle)" }}>
+                          <td colSpan={6} style={{ textAlign: "right" }}>
+                            Grand Total Purchase Bill:
+                          </td>
+                          <td style={{ textAlign: "right", color: "var(--primary)" }}>
+                            ₹
+                            {purchaseItems
+                              .reduce((sum, it) => sum + Number(it.total || 0), 0)
+                              .toFixed(2)}
+                          </td>
+                          <td />
+                        </tr>
+                      </tfoot>
                     </table>
                   </div>
                 ) : (
@@ -5706,33 +6582,132 @@ export default function App() {
             </div>
 
             {/* Inward Purchases History */}
-            <div className="card">
-              <h2
-                style={{
-                  fontSize: "1.125rem",
-                  fontWeight: 600,
-                  marginBottom: "16px",
-                }}
-              >
-                Past Inward Stock Purchases
-              </h2>
-              {purchases.length > 0 ? (
-                <div className="table-container">
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>Date</th>
-                        <th>Supplier</th>
-                        <th>Bill Reference</th>
-                        <th style={{ textAlign: "center" }}>Details</th>
-                        <th style={{ textAlign: "right" }}>Total Amount</th>
-                        <th>Status</th>
-                        <th style={{ textAlign: "right" }}>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {purchases.map((pu) => {
-                        const isExpanded = expandedPurchaseId === pu.id;
+            {(() => {
+              const activePurchaseCount = purchases.filter((p) => p.status !== "CANCELLED").length;
+              const cancelledPurchaseCount = purchases.filter((p) => p.status === "CANCELLED").length;
+              const filteredPurchases = purchases.filter((pu) => {
+                if (purchaseHistoryStatusFilter === "active") return pu.status !== "CANCELLED";
+                if (purchaseHistoryStatusFilter === "cancelled") return pu.status === "CANCELLED";
+                return true;
+              }).filter((pu) => {
+                if (!purchaseSearchQuery.trim()) return true;
+                const q = purchaseSearchQuery.toLowerCase().trim();
+                const ref = (pu.referenceNumber || "").toLowerCase();
+                const supp = (pu.supplier?.name || "").toLowerCase();
+                const suppMobile = (pu.supplier?.mobile || "").toLowerCase();
+                const itemMatch = (pu.items || []).some((it) => (it.product?.name || "").toLowerCase().includes(q));
+                return ref.includes(q) || supp.includes(q) || suppMobile.includes(q) || itemMatch;
+              });
+
+              const totalPurchasePages = Math.max(1, Math.ceil(filteredPurchases.length / 10));
+              const safePurchasePage = Math.min(purchasePage, totalPurchasePages);
+              const paginatedPurchases = filteredPurchases.slice((safePurchasePage - 1) * 10, safePurchasePage * 10);
+
+              return (
+              <div className="card">
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    marginBottom: "16px",
+                    flexWrap: "wrap",
+                    gap: "10px",
+                  }}
+                >
+                  <div>
+                    <h2
+                      style={{
+                        fontSize: "1.125rem",
+                        fontWeight: 600,
+                        margin: 0,
+                      }}
+                    >
+                      Past Inward Stock Purchases
+                    </h2>
+                    <div style={{ display: "flex", gap: "8px", marginTop: "8px", flexWrap: "wrap" }}>
+                      <button
+                        type="button"
+                        className={`btn btn-sm ${purchaseHistoryStatusFilter === "all" ? "btn-primary" : "btn-secondary"}`}
+                        onClick={() => { setPurchaseHistoryStatusFilter("all"); setPurchasePage(1); }}
+                        style={{ fontSize: "0.75rem", padding: "3px 10px" }}
+                      >
+                        All Purchases ({purchases.length})
+                      </button>
+                      <button
+                        type="button"
+                        className={`btn btn-sm ${purchaseHistoryStatusFilter === "active" ? "btn-primary" : "btn-secondary"}`}
+                        onClick={() => { setPurchaseHistoryStatusFilter("active"); setPurchasePage(1); }}
+                        style={{ fontSize: "0.75rem", padding: "3px 10px" }}
+                      >
+                        Active ({activePurchaseCount})
+                      </button>
+                      <button
+                        type="button"
+                        className={`btn btn-sm ${purchaseHistoryStatusFilter === "cancelled" ? "btn-primary" : "btn-secondary"}`}
+                        onClick={() => { setPurchaseHistoryStatusFilter("cancelled"); setPurchasePage(1); }}
+                        style={{ fontSize: "0.75rem", padding: "3px 10px" }}
+                      >
+                        Cancelled ({cancelledPurchaseCount})
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={{ position: "relative", minWidth: "260px" }}>
+                    <input
+                      type="text"
+                      className="form-input"
+                      placeholder="Search purchases by supplier, ref #, or item..."
+                      value={purchaseSearchQuery}
+                      onChange={(e) => {
+                        setPurchaseSearchQuery(e.target.value);
+                        setPurchasePage(1);
+                      }}
+                      style={{ paddingRight: purchaseSearchQuery ? "32px" : "12px", height: "36px", fontSize: "0.8125rem" }}
+                    />
+                    {purchaseSearchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPurchaseSearchQuery("");
+                          setPurchasePage(1);
+                        }}
+                        style={{
+                          position: "absolute",
+                          right: "8px",
+                          top: "50%",
+                          transform: "translateY(-50%)",
+                          background: "none",
+                          border: "none",
+                          cursor: "pointer",
+                          color: "var(--text-secondary)",
+                        }}
+                        title="Clear search"
+                      >
+                        <X size={15} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {filteredPurchases.length > 0 ? (
+                  <div>
+                  <div className="table-container">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>Date</th>
+                          <th>Supplier</th>
+                          <th>Bill Reference</th>
+                          <th style={{ textAlign: "center" }}>Details</th>
+                          <th style={{ textAlign: "right" }}>Total Amount</th>
+                          <th>Status</th>
+                          <th style={{ textAlign: "right" }}>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {paginatedPurchases.map((pu) => {
+                          const isExpanded = expandedPurchaseId === pu.id;
                         return (
                           <React.Fragment key={pu.id}>
                             <tr key={pu.id} style={pu.status === "CANCELLED" ? { opacity: 0.75 } : undefined}>
@@ -5760,11 +6735,13 @@ export default function App() {
                                 <button
                                   type="button"
                                   className="btn btn-secondary btn-sm"
-                                  onClick={() =>
-                                    setExpandedPurchaseId(
-                                      isExpanded ? null : pu.id,
-                                    )
-                                  }
+                                  onClick={() => {
+                                    const next = isExpanded ? null : pu.id;
+                                    setExpandedPurchaseId(next);
+                                    if (next) {
+                                      loadEntityPayments("PURCHASE", pu.id);
+                                    }
+                                  }}
                                   style={{
                                     fontSize: "0.75rem",
                                     padding: "4px 10px",
@@ -5793,32 +6770,71 @@ export default function App() {
                                   >
                                     CANCELLED
                                   </span>
+                                ) : pu.paymentStatus === "PAID" ? (
+                                  <span className="badge badge-paid">PAID</span>
+                                ) : pu.paymentStatus === "PARTIAL" ? (
+                                  <span
+                                    className="badge badge-partial"
+                                    title={`Paid: ₹${Number(pu.paidAmount || 0).toFixed(2)} / Total: ₹${Number(pu.totalAmount).toFixed(2)}`}
+                                  >
+                                    PARTIAL (Due ₹{(Number(pu.totalAmount) - Number(pu.paidAmount || 0)).toFixed(2)})
+                                  </span>
                                 ) : (
-                                  <span className="badge badge-success">ACTIVE</span>
+                                  <span className="badge badge-unpaid">UNPAID</span>
                                 )}
                               </td>
                               <td style={{ textAlign: "right" }}>
-                                {pu.status === "CANCELLED" ? (
+                                <div style={{ display: "inline-flex", gap: "6px", alignItems: "center" }}>
+                                  {pu.status !== "CANCELLED" && pu.paymentStatus !== "PAID" && (
+                                    <button
+                                      type="button"
+                                      className="btn btn-secondary btn-sm"
+                                      style={{ color: "var(--primary)", borderColor: "var(--primary)", fontWeight: 600 }}
+                                      onClick={() => openPaymentModal("PURCHASE", pu)}
+                                      title="Record payment against this purchase order"
+                                    >
+                                      <Wallet size={13} /> + Pay
+                                    </button>
+                                  )}
                                   <button
                                     type="button"
                                     className="btn btn-secondary btn-sm"
-                                    disabled
-                                    style={{ fontSize: "0.75rem", opacity: 0.6 }}
-                                    title={`Cancelled: ${pu.cancellationReason || "No reason given"}`}
+                                    onClick={() => openEditPurchaseModal(pu)}
+                                    disabled={pu.status === "CANCELLED"}
+                                    title={pu.status === "CANCELLED" ? "Cannot edit cancelled purchase" : "Edit purchase bill or items"}
                                   >
-                                    <X size={13} /> Cancelled
+                                    <Edit3 size={13} /> Edit
                                   </button>
-                                ) : (
                                   <button
                                     type="button"
                                     className="btn btn-secondary btn-sm"
-                                    style={{ color: "var(--status-danger)" }}
-                                    onClick={() => openCancelPurchaseModal(pu)}
-                                    title="Cancel mistaken purchase & reverse stock"
+                                    onClick={() => openAuditHistoryModal("PURCHASE", pu)}
+                                    title="View Purchase Edit History"
                                   >
-                                    <X size={13} /> Cancel
+                                    <History size={13} /> Audit
                                   </button>
-                                )}
+                                  {pu.status === "CANCELLED" ? (
+                                    <button
+                                      type="button"
+                                      className="btn btn-secondary btn-sm"
+                                      disabled
+                                      style={{ fontSize: "0.75rem", opacity: 0.6 }}
+                                      title={`Cancelled: ${pu.cancellationReason || "No reason given"}`}
+                                    >
+                                      <X size={13} /> Cancelled
+                                    </button>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      className="btn btn-secondary btn-sm"
+                                      style={{ color: "var(--status-danger)" }}
+                                      onClick={() => openCancelPurchaseModal(pu)}
+                                      title="Cancel mistaken purchase & reverse stock"
+                                    >
+                                      <X size={13} /> Cancel
+                                    </button>
+                                  )}
+                                </div>
                               </td>
                             </tr>
                             {isExpanded && (
@@ -5838,6 +6854,8 @@ export default function App() {
                                       justifyContent: "space-between",
                                       alignItems: "center",
                                       marginBottom: "10px",
+                                      flexWrap: "wrap",
+                                      gap: "8px",
                                     }}
                                   >
                                     <div
@@ -5956,6 +6974,85 @@ export default function App() {
                                       <strong>Cancellation Reason:</strong> {pu.cancellationReason}
                                     </div>
                                   )}
+
+                                  {/* Payment History Breakdown */}
+                                  <div className="payment-history-box" style={{ marginTop: "14px" }}>
+                                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px", flexWrap: "wrap", gap: "8px" }}>
+                                      <div style={{ fontWeight: 600, fontSize: "0.875rem", display: "flex", alignItems: "center", gap: "6px" }}>
+                                        <Wallet size={15} style={{ color: "var(--primary)" }} />
+                                        <span>Payment History</span>
+                                        <span style={{ fontSize: "0.8125rem", color: "var(--text-secondary)", fontWeight: 400 }}>
+                                          (Paid: <strong>₹{Number(pu.paidAmount || 0).toFixed(2)}</strong> / Total: <strong>₹{Number(pu.totalAmount).toFixed(2)}</strong>)
+                                        </span>
+                                      </div>
+                                      {pu.status !== "CANCELLED" && pu.paymentStatus !== "PAID" && (
+                                        <button
+                                          type="button"
+                                          className="btn btn-primary btn-sm"
+                                          style={{ fontSize: "0.75rem", padding: "3px 8px", height: "26px" }}
+                                          onClick={() => openPaymentModal("PURCHASE", pu)}
+                                        >
+                                          <Plus size={12} /> Record Payment
+                                        </button>
+                                      )}
+                                    </div>
+
+                                    {entityPayments[`PURCHASE_${pu.id}`] && entityPayments[`PURCHASE_${pu.id}`].length > 0 ? (
+                                      <table className="data-table" style={{ fontSize: "0.8125rem", background: "#ffffff" }}>
+                                        <thead>
+                                          <tr>
+                                            <th>Date</th>
+                                            <th>Method</th>
+                                            <th>Notes</th>
+                                            <th style={{ textAlign: "right" }}>Amount</th>
+                                            <th>Status</th>
+                                            <th style={{ textAlign: "right" }}>Action</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {entityPayments[`PURCHASE_${pu.id}`].map((pmt) => {
+                                            const isVoided = pmt.status === "VOIDED";
+                                            return (
+                                              <tr key={pmt.id} style={isVoided ? { opacity: 0.6 } : undefined}>
+                                                <td>{new Date(pmt.paymentDate || pmt.createdAt).toLocaleDateString("en-IN")}</td>
+                                                <td>
+                                                  <span className="badge badge-neutral">{pmt.paymentMethod}</span>
+                                                </td>
+                                                <td>{pmt.notes || "—"}</td>
+                                                <td style={{ textAlign: "right", fontWeight: 600, textDecoration: isVoided ? "line-through" : "none" }}>
+                                                  ₹{Number(pmt.amount).toFixed(2)}
+                                                </td>
+                                                <td>
+                                                  {isVoided ? (
+                                                    <span className="badge badge-voided" title={`Void Reason: ${pmt.voidReason || 'N/A'}`}>VOIDED</span>
+                                                  ) : (
+                                                    <span className="badge badge-paid">ACTIVE</span>
+                                                  )}
+                                                </td>
+                                                <td style={{ textAlign: "right" }}>
+                                                  {!isVoided && pu.status !== "CANCELLED" && (
+                                                    <button
+                                                      type="button"
+                                                      className="btn btn-secondary btn-sm"
+                                                      style={{ padding: "2px 6px", fontSize: "0.7rem", color: "var(--status-danger)", height: "24px" }}
+                                                      onClick={() => openVoidPaymentModal(pmt, pu, "PURCHASE")}
+                                                      title="Void this payment with reason"
+                                                    >
+                                                      <Ban size={12} /> Void
+                                                    </button>
+                                                  )}
+                                                </td>
+                                              </tr>
+                                            );
+                                          })}
+                                        </tbody>
+                                      </table>
+                                    ) : (
+                                      <div style={{ fontSize: "0.8125rem", color: "var(--text-secondary)", padding: "6px 0" }}>
+                                        {pu.paymentStatus === "UNPAID" ? "No payments recorded yet against this purchase bill." : "Loading payments..."}
+                                      </div>
+                                    )}
+                                  </div>
                                 </td>
                               </tr>
                             )}
@@ -5965,17 +7062,31 @@ export default function App() {
                     </tbody>
                   </table>
                 </div>
+                <TablePagination
+                  currentPage={safePurchasePage}
+                  totalItems={filteredPurchases.length}
+                  pageSize={10}
+                  onPageChange={setPurchasePage}
+                  itemLabel="purchases"
+                />
+                </div>
               ) : (
                 <div className="empty-state">
                   <div className="empty-state-title">
-                    No purchases recorded yet
+                    {purchaseSearchQuery
+                      ? `No purchases match "${purchaseSearchQuery}"`
+                      : "No purchases recorded yet"}
                   </div>
                   <div className="empty-state-text">
-                    Record your first supplier purchase order above.
+                    {purchaseSearchQuery
+                      ? "Try searching by a different supplier name, invoice reference, or product."
+                      : "Record your first supplier purchase order above."}
                   </div>
                 </div>
               )}
             </div>
+            );
+          })()}
           </div>
         )}
 
@@ -6396,71 +7507,163 @@ export default function App() {
               </form>
             </div>
 
-            <div className="card">
-              <h2
-                style={{
-                  fontSize: "1.125rem",
-                  fontWeight: 600,
-                  marginBottom: "16px",
-                }}
-              >
-                Saved Customers
-              </h2>
-              {customers.length > 0 ? (
-                <div className="table-container">
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>Name</th>
-                        <th>Mobile</th>
-                        <th>State / Place of Supply</th>
-                        <th>GSTIN</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {customers.map((c) => {
-                        const code = resolveCustomerStateCode(c) || "24";
-                        return (
-                          <tr key={c.id}>
-                            <td style={{ fontWeight: 600 }}>{c.name}</td>
-                            <td>{c.mobile || "—"}</td>
-                            <td>
-                              <span style={{ fontWeight: 500 }}>
-                                {getStateNameByCode(code)}
-                              </span>{" "}
-                              <span
-                                style={{
-                                  color: "var(--text-muted)",
-                                  fontSize: "0.8125rem",
-                                }}
-                              >
-                                ({code})
-                              </span>
-                            </td>
-                            <td>
-                              {c.gstin || (
-                                <span style={{ color: "var(--text-muted)" }}>
-                                  Consumer
+            {(() => {
+              const filteredCustomers = customers.filter((c) => {
+                if (!customerTableSearch.trim()) return true;
+                const q = customerTableSearch.toLowerCase().trim();
+                const name = (c.name || "").toLowerCase();
+                const mobile = (c.mobile || "").toLowerCase();
+                const gstin = (c.gstin || "").toLowerCase();
+                const code = resolveCustomerStateCode(c) || "24";
+                const stateName = (getStateNameByCode(code) || "").toLowerCase();
+                return name.includes(q) || mobile.includes(q) || gstin.includes(q) || code.includes(q) || stateName.includes(q);
+              });
+
+              const totalCustomerPages = Math.max(1, Math.ceil(filteredCustomers.length / 10));
+              const safeCustomerPage = Math.min(customerPage, totalCustomerPages);
+              const paginatedCustomers = filteredCustomers.slice((safeCustomerPage - 1) * 10, safeCustomerPage * 10);
+
+              return (
+              <div className="card">
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    marginBottom: "16px",
+                    flexWrap: "wrap",
+                    gap: "10px",
+                  }}
+                >
+                  <h2
+                    style={{
+                      fontSize: "1.125rem",
+                      fontWeight: 600,
+                      margin: 0,
+                    }}
+                  >
+                    Saved Customers ({customers.length})
+                  </h2>
+
+                  <div style={{ position: "relative", minWidth: "260px" }}>
+                    <input
+                      type="text"
+                      className="form-input"
+                      placeholder="Search customers by name, phone, GSTIN..."
+                      value={customerTableSearch}
+                      onChange={(e) => {
+                        setCustomerTableSearch(e.target.value);
+                        setCustomerPage(1);
+                      }}
+                      style={{ paddingRight: customerTableSearch ? "32px" : "12px", height: "36px", fontSize: "0.8125rem" }}
+                    />
+                    {customerTableSearch && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCustomerTableSearch("");
+                          setCustomerPage(1);
+                        }}
+                        style={{
+                          position: "absolute",
+                          right: "8px",
+                          top: "50%",
+                          transform: "translateY(-50%)",
+                          background: "none",
+                          border: "none",
+                          cursor: "pointer",
+                          color: "var(--text-secondary)",
+                        }}
+                        title="Clear search"
+                      >
+                        <X size={15} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {filteredCustomers.length > 0 ? (
+                  <div>
+                  <div className="table-container">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>Name</th>
+                          <th>Mobile</th>
+                          <th>State / Place of Supply</th>
+                          <th>GSTIN</th>
+                          <th style={{ textAlign: "right" }}>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {paginatedCustomers.map((c) => {
+                          const code = resolveCustomerStateCode(c) || "24";
+                          return (
+                            <tr key={c.id}>
+                              <td style={{ fontWeight: 600 }}>{c.name}</td>
+                              <td>{c.mobile || "—"}</td>
+                              <td>
+                                <span style={{ fontWeight: 500 }}>
+                                  {getStateNameByCode(code)}
+                                </span>{" "}
+                                <span
+                                  style={{
+                                    color: "var(--text-muted)",
+                                    fontSize: "0.8125rem",
+                                  }}
+                                >
+                                  ({code})
                                 </span>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div className="empty-state">
-                  <div className="empty-state-title">
-                    No customers added yet
+                              </td>
+                              <td>
+                                {c.gstin || (
+                                  <span style={{ color: "var(--text-muted)" }}>
+                                    Consumer
+                                  </span>
+                                )}
+                              </td>
+                              <td style={{ textAlign: "right" }}>
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary btn-sm"
+                                  onClick={() => openCustomerLedger(c)}
+                                  title="View Customer Account Statement & Ledger"
+                                >
+                                  <Receipt size={13} />
+                                  <span>Statement / Ledger</span>
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
                   </div>
-                  <div className="empty-state-text">
-                    Add your first customer to bill them directly.
+                  <TablePagination
+                    currentPage={safeCustomerPage}
+                    totalItems={filteredCustomers.length}
+                    pageSize={10}
+                    onPageChange={setCustomerPage}
+                    itemLabel="customers"
+                  />
                   </div>
-                </div>
-              )}
-            </div>
+                ) : (
+                  <div className="empty-state">
+                    <div className="empty-state-title">
+                      {customerTableSearch
+                        ? `No customers match "${customerTableSearch}"`
+                        : "No customers added yet"}
+                    </div>
+                    <div className="empty-state-text">
+                      {customerTableSearch
+                        ? "Try searching with a different customer name, phone number, or GSTIN."
+                        : "Add your first customer to bill them directly."}
+                    </div>
+                  </div>
+                )}
+              </div>
+              );
+            })()}
           </div>
         )}
 
@@ -6570,50 +7773,141 @@ export default function App() {
               </form>
             </div>
 
-            <div className="card">
-              <h2
-                style={{
-                  fontSize: "1.125rem",
-                  fontWeight: 600,
-                  marginBottom: "16px",
-                }}
-              >
-                Supplier Directory
-              </h2>
-              {suppliers.length > 0 ? (
-                <div className="table-container">
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>Supplier Name</th>
-                        <th>Phone</th>
-                        <th>Address</th>
-                        <th>GSTIN</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {suppliers.map((s) => (
-                        <tr key={s.id}>
-                          <td style={{ fontWeight: 600 }}>{s.name}</td>
-                          <td>{s.mobile || "—"}</td>
-                          <td>{s.address || "—"}</td>
-                          <td>{s.gstin || "—"}</td>
+            {(() => {
+              const filteredSuppliers = suppliers.filter((s) => {
+                if (!supplierTableSearch.trim()) return true;
+                const q = supplierTableSearch.toLowerCase().trim();
+                const name = (s.name || "").toLowerCase();
+                const phone = (s.mobile || "").toLowerCase();
+                const address = (s.address || "").toLowerCase();
+                const gstin = (s.gstin || "").toLowerCase();
+                return name.includes(q) || phone.includes(q) || address.includes(q) || gstin.includes(q);
+              });
+
+              const totalSupplierPages = Math.max(1, Math.ceil(filteredSuppliers.length / 10));
+              const safeSupplierPage = Math.min(supplierPage, totalSupplierPages);
+              const paginatedSuppliers = filteredSuppliers.slice((safeSupplierPage - 1) * 10, safeSupplierPage * 10);
+
+              return (
+              <div className="card">
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    marginBottom: "16px",
+                    flexWrap: "wrap",
+                    gap: "10px",
+                  }}
+                >
+                  <h2
+                    style={{
+                      fontSize: "1.125rem",
+                      fontWeight: 600,
+                      margin: 0,
+                    }}
+                  >
+                    Supplier Directory ({suppliers.length})
+                  </h2>
+
+                  <div style={{ position: "relative", minWidth: "260px" }}>
+                    <input
+                      type="text"
+                      className="form-input"
+                      placeholder="Search suppliers by name, phone, GSTIN..."
+                      value={supplierTableSearch}
+                      onChange={(e) => {
+                        setSupplierTableSearch(e.target.value);
+                        setSupplierPage(1);
+                      }}
+                      style={{ paddingRight: supplierTableSearch ? "32px" : "12px", height: "36px", fontSize: "0.8125rem" }}
+                    />
+                    {supplierTableSearch && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSupplierTableSearch("");
+                          setSupplierPage(1);
+                        }}
+                        style={{
+                          position: "absolute",
+                          right: "8px",
+                          top: "50%",
+                          transform: "translateY(-50%)",
+                          background: "none",
+                          border: "none",
+                          cursor: "pointer",
+                          color: "var(--text-secondary)",
+                        }}
+                        title="Clear search"
+                      >
+                        <X size={15} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {filteredSuppliers.length > 0 ? (
+                  <div>
+                  <div className="table-container">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>Supplier Name</th>
+                          <th>Phone</th>
+                          <th>Address</th>
+                          <th>GSTIN</th>
+                          <th style={{ textAlign: "right" }}>Actions</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div className="empty-state">
-                  <div className="empty-state-title">
-                    No suppliers added yet
+                      </thead>
+                      <tbody>
+                        {paginatedSuppliers.map((s) => (
+                          <tr key={s.id}>
+                            <td style={{ fontWeight: 600 }}>{s.name}</td>
+                            <td>{s.mobile || "—"}</td>
+                            <td>{s.address || "—"}</td>
+                            <td>{s.gstin || "—"}</td>
+                            <td style={{ textAlign: "right" }}>
+                              <button
+                                type="button"
+                                className="btn btn-secondary btn-sm"
+                                onClick={() => openSupplierLedger(s)}
+                                title="View Supplier Account Statement & Ledger"
+                              >
+                                <Receipt size={13} />
+                                <span>Statement / Ledger</span>
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
-                  <div className="empty-state-text">
-                    Add your suppliers above to record inward purchases.
+                  <TablePagination
+                    currentPage={safeSupplierPage}
+                    totalItems={filteredSuppliers.length}
+                    pageSize={10}
+                    onPageChange={setSupplierPage}
+                    itemLabel="suppliers"
+                  />
                   </div>
-                </div>
-              )}
-            </div>
+                ) : (
+                  <div className="empty-state">
+                    <div className="empty-state-title">
+                      {supplierTableSearch
+                        ? `No suppliers match "${supplierTableSearch}"`
+                        : "No suppliers added yet"}
+                    </div>
+                    <div className="empty-state-text">
+                      {supplierTableSearch
+                        ? "Try searching with a different supplier name, phone, or GSTIN."
+                        : "Add your suppliers above to record inward purchases."}
+                    </div>
+                  </div>
+                )}
+              </div>
+              );
+            })()}
           </div>
         )}
 
@@ -8598,6 +9892,1249 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* Audited Edit Invoice Modal */}
+      {editInvoiceModal && (
+        <div className="modal-backdrop">
+          <div className="modal-content" style={{ maxWidth: "800px", maxHeight: "90vh", display: "flex", flexDirection: "column" }}>
+            <div className="modal-header">
+              <div>
+                <div className="modal-title" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <Edit3 size={18} style={{ color: "var(--primary)" }} />
+                  Edit Invoice {editInvoiceModal.invoiceNumber}
+                </div>
+                <div style={{ fontSize: "0.875rem", color: "var(--text-secondary)" }}>
+                  Modifications will recalculate tax and adjust inventory deltas with a full audit log.
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setEditInvoiceModal(null)}
+                style={{ border: "none" }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveInvoiceEdit} style={{ display: "flex", flexDirection: "column", gap: "14px", overflowY: "auto", paddingRight: "4px" }}>
+              <div className="form-grid-2">
+                <div className="form-group">
+                  <label className="form-label">Customer</label>
+                  <select
+                    className="form-select"
+                    value={editInvoiceCustomerId}
+                    onChange={(e) => setEditInvoiceCustomerId(e.target.value)}
+                    required
+                  >
+                    <option value="">-- Select Customer --</option>
+                    {customers.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name} {c.mobile ? `(${c.mobile})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Invoice Date</label>
+                  <input
+                    type="date"
+                    className="form-input"
+                    value={editInvoiceDate}
+                    onChange={(e) => setEditInvoiceDate(e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+
+              {/* Mandatory Reason */}
+              <div className="form-group">
+                <label className="form-label" style={{ color: "var(--primary)", fontWeight: 600 }}>
+                  Reason for Modification * (Required for audit log)
+                </label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. Rate corrected as agreed with client, or quantity updated"
+                  value={editInvoiceReason}
+                  onChange={(e) => setEditInvoiceReason(e.target.value)}
+                  required
+                />
+              </div>
+
+              {/* Items List */}
+              <div className="form-group">
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                  <label className="form-label" style={{ margin: 0 }}>Invoice Items</label>
+                  <div style={{ display: "flex", gap: "8px" }}>
+                    <select
+                      className="form-select"
+                      style={{ fontSize: "0.8125rem", padding: "4px 8px", width: "auto" }}
+                      onChange={(e) => {
+                        const prod = products.find((p) => p.id === e.target.value);
+                        if (prod) {
+                          setEditInvoiceItems([
+                            ...editInvoiceItems,
+                            {
+                              productId: prod.id,
+                              name: prod.name,
+                              hsnCode: prod.hsnCode,
+                              gstRate: Number(prod.gstRate || 0),
+                              sellingPrice: Number(prod.sellingPrice || 0),
+                              qty: 1,
+                              unit: prod.unit || "PCS",
+                            },
+                          ]);
+                          e.target.value = "";
+                        }
+                      }}
+                      defaultValue=""
+                    >
+                      <option value="" disabled>+ Add Product</option>
+                      {products.map((p) => (
+                        <option key={p.id} value={p.id}>{p.name} (₹{Number(p.sellingPrice).toFixed(2)})</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="table-container" style={{ border: "1px solid var(--border)", borderRadius: "var(--radius)" }}>
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Item</th>
+                        <th style={{ width: "110px" }}>Qty</th>
+                        <th style={{ width: "130px" }}>Rate (₹)</th>
+                        <th style={{ textAlign: "right" }}>GST %</th>
+                        <th style={{ textAlign: "right" }}>Total (₹)</th>
+                        <th style={{ width: "40px" }}></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {editInvoiceItems.map((item, idx) => {
+                        const lineTaxable = (Number(item.qty) || 0) * (Number(item.sellingPrice) || 0);
+                        const lineGst = lineTaxable * ((Number(item.gstRate) || 0) / 100);
+                        const lineTotal = lineTaxable + lineGst;
+
+                        return (
+                          <tr key={idx}>
+                            <td>
+                              <div style={{ fontWeight: 600 }}>{item.name}</div>
+                              <div style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>HSN: {item.hsnCode || "N/A"}</div>
+                            </td>
+                            <td>
+                              <input
+                                type="number"
+                                step="0.01"
+                                min="0.01"
+                                className="form-input"
+                                style={{ padding: "4px 8px", fontSize: "0.875rem" }}
+                                value={item.qty}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setEditInvoiceItems(
+                                    editInvoiceItems.map((it, i) => (i === idx ? { ...it, qty: val } : it))
+                                  );
+                                }}
+                                required
+                              />
+                            </td>
+                            <td>
+                              <input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                className="form-input"
+                                style={{ padding: "4px 8px", fontSize: "0.875rem" }}
+                                value={item.sellingPrice}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setEditInvoiceItems(
+                                    editInvoiceItems.map((it, i) => (i === idx ? { ...it, sellingPrice: val } : it))
+                                  );
+                                }}
+                                required
+                              />
+                            </td>
+                            <td style={{ textAlign: "right" }}>{Number(item.gstRate).toFixed(0)}%</td>
+                            <td style={{ textAlign: "right", fontWeight: 600 }}>₹{lineTotal.toFixed(2)}</td>
+                            <td style={{ textAlign: "center" }}>
+                              {editInvoiceItems.length > 1 && (
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary btn-sm"
+                                  style={{ padding: "4px 6px", color: "var(--danger)" }}
+                                  onClick={() => setEditInvoiceItems(editInvoiceItems.filter((_, i) => i !== idx))}
+                                  title="Remove item"
+                                >
+                                  <Trash2 size={13} />
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Calculated Total summary */}
+              {(() => {
+                let totalTaxable = 0;
+                let totalGst = 0;
+                editInvoiceItems.forEach((it) => {
+                  const t = (Number(it.qty) || 0) * (Number(it.sellingPrice) || 0);
+                  const g = t * ((Number(it.gstRate) || 0) / 100);
+                  totalTaxable += t;
+                  totalGst += g;
+                });
+                const grandTotal = totalTaxable + totalGst;
+
+                return (
+                  <div style={{ display: "flex", justifyContent: "flex-end", gap: "20px", background: "var(--bg-subtle)", padding: "12px 16px", borderRadius: "var(--radius)" }}>
+                    <div style={{ fontSize: "0.875rem" }}>Taxable: <strong>₹{totalTaxable.toFixed(2)}</strong></div>
+                    <div style={{ fontSize: "0.875rem" }}>GST Total: <strong>₹{totalGst.toFixed(2)}</strong></div>
+                    <div style={{ fontSize: "1rem", color: "var(--primary)", fontWeight: 700 }}>Revised Bill Total: ₹{grandTotal.toFixed(2)}</div>
+                  </div>
+                );
+              })()}
+
+              <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end", marginTop: "10px" }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  disabled={savingInvoiceEdit}
+                  onClick={() => setEditInvoiceModal(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={savingInvoiceEdit}
+                  style={{ display: "flex", alignItems: "center", gap: "6px" }}
+                >
+                  {savingInvoiceEdit ? "Saving changes..." : <><CheckCircle2 size={16} /> Save & Apply Changes</>}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Audited Edit Purchase Modal */}
+      {editPurchaseModal && (
+        <div className="modal-backdrop">
+          <div className="modal-content" style={{ maxWidth: "840px", maxHeight: "90vh", display: "flex", flexDirection: "column" }}>
+            <div className="modal-header">
+              <div>
+                <div className="modal-title" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <Edit3 size={18} style={{ color: "var(--primary)" }} />
+                  Edit Inward Stock Purchase #{editPurchaseModal.referenceNumber}
+                </div>
+                <div style={{ fontSize: "0.875rem", color: "var(--text-secondary)" }}>
+                  Updating purchase items adjusts stock deltas and supplier ledger with full audit logging.
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setEditPurchaseModal(null)}
+                style={{ border: "none" }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSavePurchaseEdit} style={{ display: "flex", flexDirection: "column", gap: "14px", overflowY: "auto", paddingRight: "4px" }}>
+              <div className="form-grid-3">
+                <div className="form-group">
+                  <label className="form-label">Supplier</label>
+                  <select
+                    className="form-select"
+                    value={editPurchaseSupplierId}
+                    onChange={(e) => setEditPurchaseSupplierId(e.target.value)}
+                    required
+                  >
+                    <option value="">-- Select Supplier --</option>
+                    {suppliers.map((s) => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Supplier Invoice / Ref No</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={editPurchaseRefNumber}
+                    onChange={(e) => setEditPurchaseRefNumber(e.target.value)}
+                    required
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Purchase Date</label>
+                  <input
+                    type="date"
+                    className="form-input"
+                    value={editPurchaseDate}
+                    onChange={(e) => setEditPurchaseDate(e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+
+              {/* Mandatory Reason */}
+              <div className="form-group">
+                <label className="form-label" style={{ color: "var(--primary)", fontWeight: 600 }}>
+                  Reason for Modification * (Required for audit log)
+                </label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. Corrected supplier bill item rate and GST treatment"
+                  value={editPurchaseReason}
+                  onChange={(e) => setEditPurchaseReason(e.target.value)}
+                  required
+                />
+              </div>
+
+              {/* Items List */}
+              <div className="form-group">
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                  <label className="form-label" style={{ margin: 0 }}>Purchase Line Items</label>
+                  <select
+                    className="form-select"
+                    style={{ fontSize: "0.8125rem", padding: "4px 8px", width: "auto" }}
+                    onChange={(e) => {
+                      const prod = products.find((p) => p.id === e.target.value);
+                      if (prod) {
+                        setEditPurchaseItems([
+                          ...editPurchaseItems,
+                          {
+                            productId: prod.id,
+                            name: prod.name,
+                            hsnCode: prod.hsnCode,
+                            qty: 1,
+                            rate: Number(prod.purchasePrice || 0),
+                            gstRate: Number(prod.gstRate || 0),
+                            isInclusive: true,
+                          },
+                        ]);
+                        e.target.value = "";
+                      }
+                    }}
+                    defaultValue=""
+                  >
+                    <option value="" disabled>+ Add Product</option>
+                    {products.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="table-container" style={{ border: "1px solid var(--border)", borderRadius: "var(--radius)" }}>
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Product</th>
+                        <th style={{ width: "90px" }}>Qty</th>
+                        <th style={{ width: "120px" }}>Rate (₹)</th>
+                        <th style={{ width: "130px" }}>GST Mode</th>
+                        <th style={{ textAlign: "right" }}>GST %</th>
+                        <th style={{ textAlign: "right" }}>Taxable (₹)</th>
+                        <th style={{ textAlign: "right" }}>Total (₹)</th>
+                        <th style={{ width: "40px" }}></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {editPurchaseItems.map((item, idx) => {
+                        const qty = Number(item.qty) || 0;
+                        const rate = Number(item.rate) || 0;
+                        const gstRate = Number(item.gstRate) || 0;
+                        const isIncl = item.isInclusive !== false;
+
+                        let taxableValue = 0;
+                        let gstAmount = 0;
+                        let lineTotal = 0;
+
+                        if (isIncl) {
+                          const totalEntered = qty * rate;
+                          taxableValue = gstRate > 0 ? totalEntered / (1 + gstRate / 100) : totalEntered;
+                          gstAmount = totalEntered - taxableValue;
+                          lineTotal = totalEntered;
+                        } else {
+                          taxableValue = qty * rate;
+                          gstAmount = taxableValue * (gstRate / 100);
+                          lineTotal = taxableValue + gstAmount;
+                        }
+
+                        return (
+                          <tr key={idx}>
+                            <td>
+                              <div style={{ fontWeight: 600 }}>{item.name}</div>
+                              <div style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>HSN: {item.hsnCode || "N/A"}</div>
+                            </td>
+                            <td>
+                              <input
+                                type="number"
+                                step="0.01"
+                                min="0.01"
+                                className="form-input"
+                                style={{ padding: "4px 8px", fontSize: "0.875rem" }}
+                                value={item.qty}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setEditPurchaseItems(
+                                    editPurchaseItems.map((it, i) => (i === idx ? { ...it, qty: val } : it))
+                                  );
+                                }}
+                                required
+                              />
+                            </td>
+                            <td>
+                              <input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                className="form-input"
+                                style={{ padding: "4px 8px", fontSize: "0.875rem" }}
+                                value={item.rate}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setEditPurchaseItems(
+                                    editPurchaseItems.map((it, i) => (i === idx ? { ...it, rate: val } : it))
+                                  );
+                                }}
+                                required
+                              />
+                            </td>
+                            <td>
+                              <select
+                                className="form-select"
+                                style={{ padding: "4px 6px", fontSize: "0.8125rem" }}
+                                value={isIncl ? "inclusive" : "exclusive"}
+                                onChange={(e) => {
+                                  const isInc = e.target.value === "inclusive";
+                                  setEditPurchaseItems(
+                                    editPurchaseItems.map((it, i) => (i === idx ? { ...it, isInclusive: isInc } : it))
+                                  );
+                                }}
+                              >
+                                <option value="inclusive">GST Incl.</option>
+                                <option value="exclusive">GST Excl.</option>
+                              </select>
+                            </td>
+                            <td style={{ textAlign: "right" }}>{gstRate.toFixed(0)}%</td>
+                            <td style={{ textAlign: "right" }}>₹{taxableValue.toFixed(2)}</td>
+                            <td style={{ textAlign: "right", fontWeight: 600 }}>₹{lineTotal.toFixed(2)}</td>
+                            <td style={{ textAlign: "center" }}>
+                              {editPurchaseItems.length > 1 && (
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary btn-sm"
+                                  style={{ padding: "4px 6px", color: "var(--danger)" }}
+                                  onClick={() => setEditPurchaseItems(editPurchaseItems.filter((_, i) => i !== idx))}
+                                  title="Remove item"
+                                >
+                                  <Trash2 size={13} />
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Purchase Totals */}
+              {(() => {
+                let totalTaxable = 0;
+                let totalGst = 0;
+                let grandTotal = 0;
+                editPurchaseItems.forEach((it) => {
+                  const qty = Number(it.qty) || 0;
+                  const rate = Number(it.rate) || 0;
+                  const gstRate = Number(it.gstRate) || 0;
+                  const isIncl = it.isInclusive !== false;
+                  if (isIncl) {
+                    const totalEntered = qty * rate;
+                    const tax = gstRate > 0 ? totalEntered / (1 + gstRate / 100) : totalEntered;
+                    totalTaxable += tax;
+                    totalGst += (totalEntered - tax);
+                    grandTotal += totalEntered;
+                  } else {
+                    const tax = qty * rate;
+                    const gst = tax * (gstRate / 100);
+                    totalTaxable += tax;
+                    totalGst += gst;
+                    grandTotal += (tax + gst);
+                  }
+                });
+
+                return (
+                  <div style={{ display: "flex", justifyContent: "flex-end", gap: "20px", background: "var(--bg-subtle)", padding: "12px 16px", borderRadius: "var(--radius)" }}>
+                    <div style={{ fontSize: "0.875rem" }}>Taxable: <strong>₹{totalTaxable.toFixed(2)}</strong></div>
+                    <div style={{ fontSize: "0.875rem" }}>GST Total: <strong>₹{totalGst.toFixed(2)}</strong></div>
+                    <div style={{ fontSize: "1rem", color: "var(--primary)", fontWeight: 700 }}>Revised Total: ₹{grandTotal.toFixed(2)}</div>
+                  </div>
+                );
+              })()}
+
+              <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end", marginTop: "10px" }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  disabled={savingPurchaseEdit}
+                  onClick={() => setEditPurchaseModal(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={savingPurchaseEdit}
+                  style={{ display: "flex", alignItems: "center", gap: "6px" }}
+                >
+                  {savingPurchaseEdit ? "Saving changes..." : <><CheckCircle2 size={16} /> Save & Apply Changes</>}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Audit History Log Timeline Modal */}
+      {auditModal && (
+        <div className="modal-backdrop">
+          <div className="modal-content" style={{ maxWidth: "680px", maxHeight: "85vh", display: "flex", flexDirection: "column" }}>
+            <div className="modal-header">
+              <div>
+                <div className="modal-title" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <History size={18} style={{ color: "var(--primary)" }} />
+                  Audit History — {auditModal.entityType === "INVOICE" ? `Invoice ${auditModal.entity.invoiceNumber}` : `Purchase ${auditModal.entity.referenceNumber}`}
+                </div>
+                <div style={{ fontSize: "0.875rem", color: "var(--text-secondary)" }}>
+                  Immutable chronological audit log of all creations, edits, and modifications.
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setAuditModal(null)}
+                style={{ border: "none" }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div style={{ overflowY: "auto", padding: "12px 0", flex: 1 }}>
+              {auditModal.loading ? (
+                <div style={{ textAlign: "center", padding: "30px", color: "var(--text-secondary)" }}>
+                  Loading audit trail...
+                </div>
+              ) : auditModal.logs.length === 0 ? (
+                <div style={{ textAlign: "center", padding: "30px", color: "var(--text-secondary)" }}>
+                  <History size={32} style={{ opacity: 0.4, marginBottom: "8px" }} />
+                  <div>No modification history recorded yet for this transaction.</div>
+                </div>
+              ) : (
+                <div className="audit-timeline">
+                  {auditModal.logs.map((log) => (
+                    <div key={log.id} className="audit-timeline-item">
+                      <div className="audit-timeline-marker" />
+                      <div className="audit-timeline-content">
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+                          <span style={{ fontSize: "0.875rem", fontWeight: 600, color: "var(--text-primary)" }}>
+                            {log.fieldChanged}
+                          </span>
+                          <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
+                            {new Date(log.editedAt).toLocaleString("en-IN")}
+                          </span>
+                        </div>
+
+                        <div className="audit-diff-box" style={{ marginTop: "4px", marginBottom: "6px" }}>
+                          <span style={{ color: "var(--danger)", textDecoration: log.oldValue ? "line-through" : "none", marginRight: "6px" }}>
+                            {log.oldValue || "None"}
+                          </span>
+                          ➔
+                          <span style={{ color: "var(--success)", fontWeight: 600, marginLeft: "6px" }}>
+                            {log.newValue || "None"}
+                          </span>
+                        </div>
+
+                        {log.reason && (
+                          <div style={{ fontSize: "0.8125rem", background: "var(--bg-subtle)", padding: "4px 8px", borderRadius: "4px", color: "var(--text-secondary)" }}>
+                            <strong>Reason:</strong> {log.reason}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "12px" }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setAuditModal(null)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Record Payment Modal */}
+      {paymentModal && (
+        <div className="modal-backdrop">
+          <div className="modal-content" style={{ maxWidth: "480px" }}>
+            <div className="modal-header">
+              <div>
+                <div className="modal-title" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <Wallet size={18} style={{ color: "var(--primary)" }} />
+                  Record Payment
+                </div>
+                <div style={{ fontSize: "0.875rem", color: "var(--text-secondary)" }}>
+                  {paymentModal.entityType === "INVOICE"
+                    ? `Invoice ${paymentModal.entity.invoiceNumber}`
+                    : `Purchase ${paymentModal.entity.referenceNumber}`}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setPaymentModal(null)}
+                style={{ border: "none" }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div style={{ background: "var(--bg-subtle)", borderRadius: "8px", padding: "12px", marginBottom: "16px", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", textAlign: "center" }}>
+              <div>
+                <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", textTransform: "uppercase" }}>Bill Total</div>
+                <div style={{ fontSize: "0.9375rem", fontWeight: 700 }}>
+                  ₹{(paymentModal.entityType === "INVOICE" ? Number(paymentModal.entity.billAmount || 0) : Number(paymentModal.entity.totalAmount || 0)).toFixed(2)}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", textTransform: "uppercase" }}>Already Paid</div>
+                <div style={{ fontSize: "0.9375rem", fontWeight: 700, color: "var(--success)" }}>
+                  ₹{Number(paymentModal.entity.paidAmount || 0).toFixed(2)}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", textTransform: "uppercase" }}>Balance Due</div>
+                <div style={{ fontSize: "0.9375rem", fontWeight: 700, color: "var(--danger)" }}>
+                  ₹{((paymentModal.entityType === "INVOICE" ? Number(paymentModal.entity.billAmount || 0) : Number(paymentModal.entity.totalAmount || 0)) - Number(paymentModal.entity.paidAmount || 0)).toFixed(2)}
+                </div>
+              </div>
+            </div>
+
+            {paymentFormError && (
+              <div className="banner banner-error" style={{ marginBottom: "16px" }}>
+                <AlertCircle size={16} style={{ flexShrink: 0 }} />
+                <span>{paymentFormError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSubmitPayment}>
+              <div className="form-group">
+                <label className="form-label">Payment Amount (₹)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  max={(paymentModal.entityType === "INVOICE" ? Number(paymentModal.entity.billAmount || 0) : Number(paymentModal.entity.totalAmount || 0)) - Number(paymentModal.entity.paidAmount || 0)}
+                  className="form-input"
+                  placeholder="0.00"
+                  value={paymentForm.amount}
+                  onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })}
+                  required
+                  autoFocus
+                />
+              </div>
+
+              <div className="form-grid-2">
+                <div className="form-group">
+                  <label className="form-label">Payment Date</label>
+                  <input
+                    type="date"
+                    className="form-input"
+                    max={getTodayDateString()}
+                    value={paymentForm.paymentDate}
+                    onChange={(e) => setPaymentForm({ ...paymentForm, paymentDate: e.target.value })}
+                    required
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Payment Method</label>
+                  <select
+                    className="form-select"
+                    value={paymentForm.paymentMethod}
+                    onChange={(e) => setPaymentForm({ ...paymentForm, paymentMethod: e.target.value })}
+                  >
+                    <option value="CASH">Cash</option>
+                    <option value="UPI">UPI</option>
+                    <option value="BANK_TRANSFER">Bank Transfer / NEFT</option>
+                    <option value="CARD">Debit / Credit Card</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">
+                  Notes / Reference <span className="form-label-optional">(optional)</span>
+                </label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g., UTR / Cheque # / remarks"
+                  value={paymentForm.notes}
+                  onChange={(e) => setPaymentForm({ ...paymentForm, notes: e.target.value })}
+                />
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "20px" }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setPaymentModal(null)}
+                  disabled={submittingPayment}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={submittingPayment}
+                >
+                  {submittingPayment ? "Recording..." : "Record Payment"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Void Payment Confirmation Modal */}
+      {voidPaymentModal && (
+        <div className="modal-backdrop">
+          <div className="modal-content" style={{ maxWidth: "440px" }}>
+            <div className="modal-header">
+              <div>
+                <div className="modal-title" style={{ display: "flex", alignItems: "center", gap: "8px", color: "var(--danger)" }}>
+                  <Ban size={18} />
+                  Void Payment
+                </div>
+                <div style={{ fontSize: "0.875rem", color: "var(--text-secondary)" }}>
+                  Payment of ₹{Number(voidPaymentModal.payment.amount).toFixed(2)} on {new Date(voidPaymentModal.payment.paymentDate).toLocaleDateString("en-IN")}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setVoidPaymentModal(null)}
+                style={{ border: "none" }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div style={{ fontSize: "0.875rem", color: "var(--text-secondary)", marginBottom: "16px", lineHeight: "1.5" }}>
+              Voiding this payment will decrement the paid amount and revert the balance status. This action is irreversible and recorded in the audit trail.
+            </div>
+
+            <form onSubmit={handleVoidPayment}>
+              <div className="form-group">
+                <label className="form-label">
+                  Reason for Voiding <span style={{ color: "var(--danger)" }}>*</span>
+                </label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g., Cheque bounce / duplicate entry / incorrect account"
+                  value={voidPaymentReason}
+                  onChange={(e) => setVoidPaymentReason(e.target.value)}
+                  required
+                  autoFocus
+                />
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "20px" }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setVoidPaymentModal(null)}
+                  disabled={submittingVoid}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn"
+                  style={{ background: "var(--danger)", color: "#fff" }}
+                  disabled={submittingVoid}
+                >
+                  {submittingVoid ? "Voiding..." : "Confirm Void"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Customer Account Statement & Ledger Modal */}
+      {customerLedgerModal && (() => {
+        const cust = customerLedgerModal.customer;
+        const stateCode = resolveCustomerStateCode(cust);
+        const stateName = stateCode ? getStateNameByCode(stateCode) : (cust.state || "—");
+        const comp = companySettings || {};
+        const data = customerLedgerModal.data;
+
+        return (
+          <div className="modal-backdrop">
+            <div className="modal-content" style={{ maxWidth: "900px", maxHeight: "92vh", display: "flex", flexDirection: "column" }}>
+              <div className="modal-header no-print">
+                <div>
+                  <div className="modal-title" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <Receipt size={18} style={{ color: "var(--primary)" }} />
+                    Customer Statement & Ledger — {cust.name}
+                  </div>
+                  <div style={{ fontSize: "0.875rem", color: "var(--text-secondary)" }}>
+                    {cust.mobile ? `Mobile: ${cust.mobile} • ` : ""}
+                    {cust.gstin ? `GSTIN: ${cust.gstin}` : "Consumer / Unregistered"}
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={() => window.print()}
+                    title="Print Account Statement (A4)"
+                  >
+                    <Printer size={14} />
+                    <span>Print Statement</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => setCustomerLedgerModal(null)}
+                    style={{ border: "none" }}
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ overflowY: "auto", padding: "12px 4px", flex: 1 }}>
+                {customerLedgerModal.loading ? (
+                  <div style={{ textAlign: "center", padding: "40px", color: "var(--text-secondary)" }}>
+                    Loading ledger statements...
+                  </div>
+                ) : !data ? (
+                  <div style={{ textAlign: "center", padding: "40px", color: "var(--text-secondary)" }}>
+                    Unable to load ledger data.
+                  </div>
+                ) : (
+                  <div className="statement-container" id="customer-ledger-statement">
+                    {/* Professional Company Letterhead */}
+                    <div className="statement-letterhead">
+                      <div className="statement-company-info">
+                        <img
+                          src={getLogoSrc(comp.logoUrl)}
+                          alt={comp.name || "Company Logo"}
+                          className="statement-company-logo"
+                        />
+                        <div className="statement-company-details">
+                          <h2 className="statement-company-name">{comp.name || "Prathna Enterprise"}</h2>
+                          {comp.address && <div className="statement-company-sub">{comp.address}</div>}
+                          <div className="statement-company-sub">
+                            {comp.phone ? `Phone: ${comp.phone}` : ""}
+                          </div>
+                          <div className="statement-company-tax">
+                            {comp.gstin ? `GSTIN: ${comp.gstin} ` : ""}
+                            {comp.pan ? `• PAN: ${comp.pan}` : ""}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="statement-meta-box">
+                        <h3 className="statement-doc-title">Statement of Account</h3>
+                        <div className="statement-badge">Customer Ledger</div>
+                        <div className="statement-date-text">
+                          As of: {new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Two Column Grid: Customer Info & Account Summary */}
+                    <div className="statement-parties-grid">
+                      <div className="statement-party-card">
+                        <div className="statement-card-heading">Account Statement To</div>
+                        <div className="statement-party-name">{cust.name}</div>
+                        {cust.mobile && <div className="statement-party-meta"><strong>Mobile:</strong> {cust.mobile}</div>}
+                        {cust.address && <div className="statement-party-meta"><strong>Address:</strong> {cust.address}</div>}
+                        <div className="statement-party-meta">
+                          <strong>State:</strong> {stateCode ? `${stateCode} - ${stateName}` : (cust.state || "—")}
+                        </div>
+                        <div className="statement-party-meta">
+                          <strong>GSTIN:</strong> {cust.gstin || "URP (Unregistered Person / Consumer)"}
+                        </div>
+                      </div>
+
+                      <div className="statement-kpi-card">
+                        <div className="statement-card-heading">Account Overview</div>
+                        <div className="statement-kpi-row">
+                          <span>Total Invoiced (Billed):</span>
+                          <strong>₹{Number(data.summary.totalBilled).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</strong>
+                        </div>
+                        <div className="statement-kpi-row">
+                          <span>Total Paid (Received):</span>
+                          <strong style={{ color: "var(--success)" }}>₹{Number(data.summary.totalPaid).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</strong>
+                        </div>
+                        <div className="statement-kpi-row total-due-row">
+                          <span>Closing Balance (Due):</span>
+                          <strong style={{ color: data.summary.currentBalance > 0 ? "var(--danger)" : "var(--success)" }}>
+                            ₹{Number(data.summary.currentBalance).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                          </strong>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Transactions Ledger Table */}
+                    <div className="statement-table-wrap">
+                      <table className="statement-table">
+                        <thead>
+                          <tr>
+                            <th style={{ width: "95px" }}>Date</th>
+                            <th style={{ width: "85px" }}>Type</th>
+                            <th style={{ width: "120px" }}>Reference #</th>
+                            <th>Payment Mode / Notes</th>
+                            <th style={{ width: "115px", textAlign: "right" }}>Debit (Billed)</th>
+                            <th style={{ width: "115px", textAlign: "right" }}>Credit (Paid)</th>
+                            <th style={{ width: "125px", textAlign: "right" }}>Running Balance</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {data.transactions.length === 0 ? (
+                            <tr>
+                              <td colSpan="7" style={{ textAlign: "center", padding: "24px", color: "var(--text-muted)" }}>
+                                No transactions recorded for this customer yet.
+                              </td>
+                            </tr>
+                          ) : (
+                            data.transactions.map((tx) => (
+                              <tr key={tx.id}>
+                                <td>{new Date(tx.date).toLocaleDateString("en-IN")}</td>
+                                <td>
+                                  <span className={`badge ${tx.type === "INVOICE" ? "badge-primary" : "badge-success"}`}>
+                                    {tx.type}
+                                  </span>
+                                </td>
+                                <td style={{ fontWeight: 600 }}>{tx.reference}</td>
+                                <td style={{ fontSize: "0.8125rem", color: "var(--text-secondary)" }}>
+                                  {tx.method || "—"} {tx.notes ? `(${tx.notes})` : ""}
+                                </td>
+                                <td style={{ textAlign: "right", fontWeight: tx.debit > 0 ? 600 : 400 }}>
+                                  {tx.debit > 0 ? `₹${Number(tx.debit).toFixed(2)}` : "—"}
+                                </td>
+                                <td style={{ textAlign: "right", fontWeight: tx.credit > 0 ? 600 : 400, color: tx.credit > 0 ? "var(--success)" : "inherit" }}>
+                                  {tx.credit > 0 ? `₹${Number(tx.credit).toFixed(2)}` : "—"}
+                                </td>
+                                <td style={{ textAlign: "right", fontWeight: 700, color: tx.balance > 0 ? "var(--danger)" : "var(--text-primary)" }}>
+                                  ₹{Number(tx.balance).toFixed(2)}
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                        {data.transactions.length > 0 && (
+                          <tfoot>
+                            <tr>
+                              <td colSpan="4" style={{ textAlign: "right", fontWeight: 700 }}>Total / Closing:</td>
+                              <td style={{ textAlign: "right" }}>₹{Number(data.summary.totalBilled).toFixed(2)}</td>
+                              <td style={{ textAlign: "right", color: "var(--success)" }}>₹{Number(data.summary.totalPaid).toFixed(2)}</td>
+                              <td style={{ textAlign: "right", color: data.summary.currentBalance > 0 ? "var(--danger)" : "inherit" }}>
+                                ₹{Number(data.summary.currentBalance).toFixed(2)}
+                              </td>
+                            </tr>
+                          </tfoot>
+                        )}
+                      </table>
+                    </div>
+
+                    {/* Statement Footer & Sign-off */}
+                    <div className="statement-footer-section">
+                      <div className="statement-footer-notice">
+                        <div>* This is a computer generated Statement of Account and does not require a physical signature unless requested.</div>
+                        <div style={{ marginTop: "4px", fontSize: "0.7rem", color: "var(--text-muted)" }}>
+                          Generated on {new Date().toLocaleString("en-IN")}
+                        </div>
+                      </div>
+                      <div className="statement-signature-box">
+                        <div style={{ fontSize: "0.75rem", fontWeight: 700, color: "#1e293b" }}>
+                          For {comp.name || "Prathna Enterprise"}
+                        </div>
+                        <div className="statement-signature-line">
+                          Authorized Signatory
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="no-print" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "12px", paddingTop: "10px", borderTop: "1px solid var(--border)" }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setCustomerLedgerModal(null)}
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => window.print()}
+                >
+                  <Printer size={15} />
+                  <span>Print Statement (A4)</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Supplier Account Statement & Ledger Modal */}
+      {supplierLedgerModal && (() => {
+        const supp = supplierLedgerModal.supplier;
+        const stateCode = supp.gstin ? getStateCodeFromGSTIN(supp.gstin) : (supp.state && INDIAN_STATES[supp.state.trim()] ? supp.state.trim() : null);
+        const stateName = stateCode ? getStateNameByCode(stateCode) : (supp.state || "—");
+        const comp = companySettings || {};
+        const data = supplierLedgerModal.data;
+
+        return (
+          <div className="modal-backdrop">
+            <div className="modal-content" style={{ maxWidth: "900px", maxHeight: "92vh", display: "flex", flexDirection: "column" }}>
+              <div className="modal-header no-print">
+                <div>
+                  <div className="modal-title" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <Receipt size={18} style={{ color: "var(--primary)" }} />
+                    Supplier Statement & Ledger — {supp.name}
+                  </div>
+                  <div style={{ fontSize: "0.875rem", color: "var(--text-secondary)" }}>
+                    {supp.mobile ? `Phone: ${supp.mobile} • ` : ""}
+                    {supp.gstin ? `GSTIN: ${supp.gstin}` : ""}
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={() => window.print()}
+                    title="Print Account Statement (A4)"
+                  >
+                    <Printer size={14} />
+                    <span>Print Statement</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => setSupplierLedgerModal(null)}
+                    style={{ border: "none" }}
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ overflowY: "auto", padding: "12px 4px", flex: 1 }}>
+                {supplierLedgerModal.loading ? (
+                  <div style={{ textAlign: "center", padding: "40px", color: "var(--text-secondary)" }}>
+                    Loading ledger statements...
+                  </div>
+                ) : !data ? (
+                  <div style={{ textAlign: "center", padding: "40px", color: "var(--text-secondary)" }}>
+                    Unable to load ledger data.
+                  </div>
+                ) : (
+                  <div className="statement-container" id="supplier-ledger-statement">
+                    {/* Professional Company Letterhead */}
+                    <div className="statement-letterhead">
+                      <div className="statement-company-info">
+                        <img
+                          src={getLogoSrc(comp.logoUrl)}
+                          alt={comp.name || "Company Logo"}
+                          className="statement-company-logo"
+                        />
+                        <div className="statement-company-details">
+                          <h2 className="statement-company-name">{comp.name || "Prathna Enterprise"}</h2>
+                          {comp.address && <div className="statement-company-sub">{comp.address}</div>}
+                          <div className="statement-company-sub">
+                            {comp.phone ? `Phone: ${comp.phone}` : ""}
+                          </div>
+                          <div className="statement-company-tax">
+                            {comp.gstin ? `GSTIN: ${comp.gstin} ` : ""}
+                            {comp.pan ? `• PAN: ${comp.pan}` : ""}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="statement-meta-box">
+                        <h3 className="statement-doc-title">Statement of Account</h3>
+                        <div className="statement-badge">Supplier Ledger</div>
+                        <div className="statement-date-text">
+                          As of: {new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Two Column Grid: Supplier Info & Account Summary */}
+                    <div className="statement-parties-grid">
+                      <div className="statement-party-card">
+                        <div className="statement-card-heading">Account Statement To</div>
+                        <div className="statement-party-name">{supp.name}</div>
+                        {supp.mobile && <div className="statement-party-meta"><strong>Phone:</strong> {supp.mobile}</div>}
+                        {supp.address && <div className="statement-party-meta"><strong>Address:</strong> {supp.address}</div>}
+                        <div className="statement-party-meta">
+                          <strong>State:</strong> {stateCode ? `${stateCode} - ${stateName}` : (supp.state || "—")}
+                        </div>
+                        <div className="statement-party-meta">
+                          <strong>GSTIN:</strong> {supp.gstin || "—"}
+                        </div>
+                      </div>
+
+                      <div className="statement-kpi-card">
+                        <div className="statement-card-heading">Account Overview</div>
+                        <div className="statement-kpi-row">
+                          <span>Total Inward (Purchased):</span>
+                          <strong>₹{Number(data.summary.totalPurchased ?? data.summary.totalBilled ?? 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</strong>
+                        </div>
+                        <div className="statement-kpi-row">
+                          <span>Total Paid Out:</span>
+                          <strong style={{ color: "var(--success)" }}>₹{Number(data.summary.totalPaid || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}</strong>
+                        </div>
+                        <div className="statement-kpi-row total-due-row">
+                          <span>Closing Balance (Payable):</span>
+                          <strong style={{ color: (data.summary.currentBalance || 0) > 0 ? "var(--danger)" : "var(--success)" }}>
+                            ₹{Number(data.summary.currentBalance || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                          </strong>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Transactions Ledger Table */}
+                    <div className="statement-table-wrap">
+                      <table className="statement-table">
+                        <thead>
+                          <tr>
+                            <th style={{ width: "95px" }}>Date</th>
+                            <th style={{ width: "85px" }}>Type</th>
+                            <th style={{ width: "120px" }}>Reference #</th>
+                            <th>Payment Mode / Notes</th>
+                            <th style={{ width: "115px", textAlign: "right" }}>Debit (Paid Out)</th>
+                            <th style={{ width: "115px", textAlign: "right" }}>Credit (Inward)</th>
+                            <th style={{ width: "125px", textAlign: "right" }}>Running Payable</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {data.transactions.length === 0 ? (
+                            <tr>
+                              <td colSpan="7" style={{ textAlign: "center", padding: "24px", color: "var(--text-muted)" }}>
+                                No transactions recorded for this supplier yet.
+                              </td>
+                            </tr>
+                          ) : (
+                            data.transactions.map((tx) => (
+                              <tr key={tx.id}>
+                                <td>{new Date(tx.date).toLocaleDateString("en-IN")}</td>
+                                <td>
+                                  <span className={`badge ${tx.type === "PURCHASE" ? "badge-primary" : "badge-success"}`}>
+                                    {tx.type}
+                                  </span>
+                                </td>
+                                <td style={{ fontWeight: 600 }}>{tx.reference}</td>
+                                <td style={{ fontSize: "0.8125rem", color: "var(--text-secondary)" }}>
+                                  {tx.method || "—"} {tx.notes ? `(${tx.notes})` : ""}
+                                </td>
+                                <td style={{ textAlign: "right", fontWeight: tx.debit > 0 ? 600 : 400, color: tx.debit > 0 ? "var(--success)" : "inherit" }}>
+                                  {tx.debit > 0 ? `₹${Number(tx.debit).toFixed(2)}` : "—"}
+                                </td>
+                                <td style={{ textAlign: "right", fontWeight: tx.credit > 0 ? 600 : 400 }}>
+                                  {tx.credit > 0 ? `₹${Number(tx.credit).toFixed(2)}` : "—"}
+                                </td>
+                                <td style={{ textAlign: "right", fontWeight: 700, color: tx.balance > 0 ? "var(--danger)" : "var(--text-primary)" }}>
+                                  ₹{Number(tx.balance).toFixed(2)}
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                        {data.transactions.length > 0 && (
+                          <tfoot>
+                            <tr>
+                              <td colSpan="4" style={{ textAlign: "right", fontWeight: 700 }}>Total / Closing:</td>
+                              <td style={{ textAlign: "right", color: "var(--success)" }}>₹{Number(data.summary.totalPaid || 0).toFixed(2)}</td>
+                              <td style={{ textAlign: "right" }}>₹{Number(data.summary.totalPurchased ?? data.summary.totalBilled ?? 0).toFixed(2)}</td>
+                              <td style={{ textAlign: "right", color: (data.summary.currentBalance || 0) > 0 ? "var(--danger)" : "inherit" }}>
+                                ₹{Number(data.summary.currentBalance || 0).toFixed(2)}
+                              </td>
+                            </tr>
+                          </tfoot>
+                        )}
+                      </table>
+                    </div>
+
+                    {/* Statement Footer & Sign-off */}
+                    <div className="statement-footer-section">
+                      <div className="statement-footer-notice">
+                        <div>* This is a computer generated Statement of Account and does not require a physical signature unless requested.</div>
+                        <div style={{ marginTop: "4px", fontSize: "0.7rem", color: "var(--text-muted)" }}>
+                          Generated on {new Date().toLocaleString("en-IN")}
+                        </div>
+                      </div>
+                      <div className="statement-signature-box">
+                        <div style={{ fontSize: "0.75rem", fontWeight: 700, color: "#1e293b" }}>
+                          For {comp.name || "Prathna Enterprise"}
+                        </div>
+                        <div className="statement-signature-line">
+                          Authorized Signatory
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="no-print" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "12px", paddingTop: "10px", borderTop: "1px solid var(--border)" }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setSupplierLedgerModal(null)}
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => window.print()}
+                >
+                  <Printer size={15} />
+                  <span>Print Statement (A4)</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

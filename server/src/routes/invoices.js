@@ -173,8 +173,8 @@ router.post('/', async (req, res) => {
       customerId,
       invoiceNumber: customInvoiceNumber,
       invoiceDate,
-      paymentStatus = 'PAID',
-      paymentMethod = 'CASH',
+      paymentStatus = 'UNPAID',
+      paymentMethod = null,
       taxType: requestedTaxType,
       items, // array of { productId, qty, rate? }
     } = req.body;
@@ -333,6 +333,7 @@ router.post('/', async (req, res) => {
           igstTotal: totals.igstTotal,
           roundOff: totals.roundOff,
           billAmount: totals.billAmount,
+          paidAmount: new Decimal(0),
           paymentStatus,
           paymentMethod,
           items: {
@@ -515,6 +516,372 @@ router.post('/:id/returns', async (req, res) => {
   }
 });
 
+// GET /invoices/:id/edits - get audit logs for invoice
+router.get('/:id/edits', async (req, res) => {
+  try {
+    const edits = await prisma.editLog.findMany({
+      where: {
+        entityType: 'INVOICE',
+        entityId: req.params.id,
+      },
+      orderBy: { editedAt: 'desc' },
+    });
+    res.json(edits);
+  } catch (error) {
+    console.error('Error fetching invoice edit history:', error);
+    res.status(500).json({ error: 'Failed to fetch invoice edit history', details: error.message });
+  }
+});
+
+// PATCH /invoices/:id - Audited edit of invoice with atomic stock delta adjustments
+router.patch('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      reason,
+      customerId,
+      invoiceDate,
+      items, // array of { productId, qty, rate? }
+    } = req.body;
+
+    if (!reason || !reason.trim()) {
+      return res.status(400).json({ error: 'Reason for editing the invoice is required' });
+    }
+
+    const editReason = reason.trim();
+
+    const updatedInvoice = await prisma.$transaction(async (tx) => {
+      const invoice = await tx.invoice.findUnique({
+        where: { id },
+        include: {
+          customer: true,
+          items: {
+            include: { product: true },
+          },
+          returns: { include: { items: true } },
+        },
+      });
+
+      if (!invoice) {
+        throw new Error('Invoice not found');
+      }
+
+      if (invoice.status === 'CANCELLED') {
+        throw new Error('Cannot edit a cancelled invoice');
+      }
+
+      // Block edit if invoice has any sales returns against it
+      if (invoice.returns && invoice.returns.length > 0) {
+        throw new Error('Cannot edit invoice: sales returns have already been processed against this invoice');
+      }
+
+      const returnItemsCount = await tx.salesReturnItem.count({
+        where: {
+          invoiceItemId: { in: invoice.items.map((it) => it.id) },
+        },
+      });
+      if (returnItemsCount > 0) {
+        throw new Error('Cannot edit invoice: sales returns have already been processed against this invoice');
+      }
+
+      // Payment guard: Block edit if invoice has any active recorded payments
+      const activePaymentsCount = await tx.payment.count({
+        where: { entityType: 'INVOICE', entityId: invoice.id, status: 'ACTIVE' },
+      });
+      if (activePaymentsCount > 0 || new Decimal(invoice.paidAmount || 0).gt(0)) {
+        throw new Error('Cannot edit invoice: active payments have already been recorded against it. Void active payments first.');
+      }
+
+      const editLogs = [];
+      const company = await tx.companySettings.findFirst();
+
+      // 1. Check Customer Change
+      let targetCustomerId = invoice.customerId;
+      let targetCustomer = invoice.customer;
+      let finalTaxType = invoice.taxType;
+
+      if (customerId && customerId !== invoice.customerId) {
+        const newCustomer = await tx.customer.findUnique({ where: { id: customerId } });
+        if (!newCustomer) throw new Error(`Customer not found with id: ${customerId}`);
+
+        editLogs.push({
+          entityType: 'INVOICE',
+          entityId: invoice.id,
+          fieldChanged: 'Customer',
+          oldValue: invoice.customer?.name || invoice.customerId,
+          newValue: newCustomer.name,
+          reason: editReason,
+        });
+
+        targetCustomerId = newCustomer.id;
+        targetCustomer = newCustomer;
+
+        // Recalculate tax type for new customer
+        const customerStateCode = resolveCustomerStateCode(newCustomer) || (newCustomer.state ? newCustomer.state.trim() : null);
+        if (customerStateCode) {
+          finalTaxType = determineTaxType({
+            customerStateCode,
+            companyGstin: company?.gstin,
+          });
+        }
+      }
+
+      // 2. Check Invoice Date Change
+      let targetInvoiceDate = invoice.invoiceDate;
+      if (invoiceDate) {
+        const d = new Date(invoiceDate);
+        if (isNaN(d.getTime())) {
+          throw new Error('Invalid invoice date');
+        }
+        const endOfToday = new Date();
+        endOfToday.setHours(23, 59, 59, 999);
+        if (d > endOfToday) {
+          throw new Error('Invoice date cannot be in the future');
+        }
+
+        const oldDateStr = new Date(invoice.invoiceDate).toISOString().split('T')[0];
+        const newDateStr = d.toISOString().split('T')[0];
+        if (oldDateStr !== newDateStr) {
+          editLogs.push({
+            entityType: 'INVOICE',
+            entityId: invoice.id,
+            fieldChanged: 'Invoice Date',
+            oldValue: oldDateStr,
+            newValue: newDateStr,
+            reason: editReason,
+          });
+          targetInvoiceDate = d;
+        }
+      }
+
+      // 3. Process Line Items
+      let finalTotals = {
+        taxableTotal: invoice.taxableTotal,
+        cgstTotal: invoice.cgstTotal,
+        sgstTotal: invoice.sgstTotal,
+        igstTotal: invoice.igstTotal,
+        roundOff: invoice.roundOff,
+        billAmount: invoice.billAmount,
+      };
+
+      if (items && Array.isArray(items) && items.length > 0) {
+        // Map old quantities per productId
+        const oldQtyMap = new Map();
+        const oldItemMap = new Map();
+        for (const oldIt of invoice.items) {
+          const prev = oldQtyMap.get(oldIt.productId) || new Decimal(0);
+          oldQtyMap.set(oldIt.productId, prev.plus(new Decimal(oldIt.qty)));
+          oldItemMap.set(oldIt.productId, oldIt);
+        }
+
+        const newQtyMap = new Map();
+        const lineCalculations = [];
+        const preparedItems = [];
+
+        for (const it of items) {
+          if (!it.productId) throw new Error('Each item must have a productId');
+          const qty = new Decimal(it.qty || 0);
+          if (qty.lte(0)) throw new Error('Quantity must be greater than zero');
+
+          const product = await tx.product.findUnique({ where: { id: it.productId } });
+          if (!product) throw new Error(`Product not found with id: ${it.productId}`);
+
+          const rate = it.rate !== undefined && it.rate !== null
+            ? new Decimal(it.rate)
+            : new Decimal(product.sellingPrice);
+
+          const calc = calculateLineItem({
+            qty,
+            rate,
+            gstRate: product.gstRate,
+            taxType: finalTaxType,
+          });
+
+          lineCalculations.push(calc);
+
+          preparedItems.push({
+            invoiceId: invoice.id,
+            productId: product.id,
+            descriptionSnapshot: product.name,
+            hsnSnapshot: product.hsnCode,
+            gstRateSnapshot: calc.gstRateSnapshot,
+            qty: calc.qty,
+            rate: calc.rate,
+            taxableValue: calc.taxableValue,
+            cgstAmount: calc.cgstAmount,
+            sgstAmount: calc.sgstAmount,
+            igstAmount: calc.igstAmount,
+            amount: calc.amount,
+          });
+
+          const currentNewQty = newQtyMap.get(product.id) || new Decimal(0);
+          newQtyMap.set(product.id, currentNewQty.plus(qty));
+
+          // Log detailed item diffs
+          const oldIt = oldItemMap.get(product.id);
+          if (oldIt) {
+            if (!new Decimal(oldIt.qty).equals(calc.qty)) {
+              editLogs.push({
+                entityType: 'INVOICE',
+                entityId: invoice.id,
+                fieldChanged: `Item: "${product.name}" - Quantity`,
+                oldValue: `${new Decimal(oldIt.qty).toString()} ${product.unit || 'PCS'}`,
+                newValue: `${calc.qty.toString()} ${product.unit || 'PCS'}`,
+                reason: editReason,
+              });
+            }
+            if (!new Decimal(oldIt.rate).equals(calc.rate)) {
+              editLogs.push({
+                entityType: 'INVOICE',
+                entityId: invoice.id,
+                fieldChanged: `Item: "${product.name}" - Rate`,
+                oldValue: `₹${new Decimal(oldIt.rate).toFixed(2)}`,
+                newValue: `₹${calc.rate.toFixed(2)}`,
+                reason: editReason,
+              });
+            }
+          } else {
+            editLogs.push({
+              entityType: 'INVOICE',
+              entityId: invoice.id,
+              fieldChanged: `Item: "${product.name}" - Added`,
+              oldValue: null,
+              newValue: `${calc.qty.toString()} units @ ₹${calc.rate.toFixed(2)}`,
+              reason: editReason,
+            });
+          }
+        }
+
+        // Check for removed items
+        for (const oldIt of invoice.items) {
+          if (!newQtyMap.has(oldIt.productId)) {
+            editLogs.push({
+              entityType: 'INVOICE',
+              entityId: invoice.id,
+              fieldChanged: `Item: "${oldIt.descriptionSnapshot || oldIt.product?.name || oldIt.productId}" - Removed`,
+              oldValue: `${new Decimal(oldIt.qty).toString()} units`,
+              newValue: null,
+              reason: editReason,
+            });
+          }
+        }
+
+        // Apply delta stock changes per product
+        const allProductIds = new Set([...oldQtyMap.keys(), ...newQtyMap.keys()]);
+        for (const prodId of allProductIds) {
+          const oldQty = oldQtyMap.get(prodId) || new Decimal(0);
+          const newQty = newQtyMap.get(prodId) || new Decimal(0);
+          const delta = newQty.minus(oldQty); // positive = more sold (reduce stock), negative = fewer sold (restore stock)
+
+          if (delta.gt(0)) {
+            // More items sold -> Atomically decrement product.currentStock using updateMany guard
+            const stockUpdated = await tx.product.updateMany({
+              where: {
+                id: prodId,
+                currentStock: { gte: delta },
+              },
+              data: {
+                currentStock: { decrement: delta },
+              },
+            });
+
+            if (stockUpdated.count === 0) {
+              const fresh = await tx.product.findUnique({
+                where: { id: prodId },
+                select: { name: true, currentStock: true },
+              });
+              const prodName = fresh?.name || prodId;
+              const available = fresh?.currentStock?.toString() || '0';
+              throw new Error(
+                `Insufficient stock for product "${prodName}". Available: ${available}, Additional required: ${delta.toString()}`
+              );
+            }
+
+            await tx.stockTransaction.create({
+              data: {
+                productId: prodId,
+                type: 'SALE',
+                quantity: delta.negated(), // negative for stock out
+                reference: `Invoice edit: ${invoice.invoiceNumber}`,
+              },
+            });
+          } else if (delta.lt(0)) {
+            // Fewer items sold -> Restore |delta| to product.currentStock
+            const restoreQty = delta.abs();
+            await tx.product.update({
+              where: { id: prodId },
+              data: {
+                currentStock: { increment: restoreQty },
+              },
+            });
+
+            await tx.stockTransaction.create({
+              data: {
+                productId: prodId,
+                type: 'ADJUSTMENT',
+                quantity: restoreQty, // positive for stock returned
+                reference: `Invoice edit: ${invoice.invoiceNumber}`,
+              },
+            });
+          }
+        }
+
+        // Recalculate invoice totals with Prisma.Decimal end-to-end
+        finalTotals = calculateInvoiceTotals(lineCalculations, finalTaxType);
+
+        // Replace invoice items
+        await tx.invoiceItem.deleteMany({ where: { invoiceId: invoice.id } });
+        await tx.invoiceItem.createMany({ data: preparedItems });
+
+        if (!new Decimal(invoice.billAmount).equals(finalTotals.billAmount)) {
+          editLogs.push({
+            entityType: 'INVOICE',
+            entityId: invoice.id,
+            fieldChanged: 'Bill Amount',
+            oldValue: `₹${new Decimal(invoice.billAmount).toFixed(2)}`,
+            newValue: `₹${new Decimal(finalTotals.billAmount).toFixed(2)}`,
+            reason: editReason,
+          });
+        }
+      }
+
+      // Write edit logs to DB
+      if (editLogs.length > 0) {
+        await tx.editLog.createMany({ data: editLogs });
+      }
+
+      // Update Invoice record
+      const updated = await tx.invoice.update({
+        where: { id: invoice.id },
+        data: {
+          customerId: targetCustomerId,
+          taxType: finalTaxType,
+          invoiceDate: targetInvoiceDate,
+          taxableTotal: finalTotals.taxableTotal,
+          cgstTotal: finalTotals.cgstTotal,
+          sgstTotal: finalTotals.sgstTotal,
+          igstTotal: finalTotals.igstTotal,
+          roundOff: finalTotals.roundOff,
+          billAmount: finalTotals.billAmount,
+        },
+        include: {
+          customer: true,
+          items: {
+            include: { product: true },
+          },
+        },
+      });
+
+      return updated;
+    }, { maxWait: 15000, timeout: 20000 });
+
+    res.json(updatedInvoice);
+  } catch (error) {
+    console.error('Error editing invoice:', error.message);
+    res.status(400).json({ error: error.message || 'Failed to edit invoice' });
+  }
+});
+
 // POST /invoices/:id/cancel - Cancel mistaken invoice (atomic stock restoration)
 router.post('/:id/cancel', async (req, res) => {
   try {
@@ -556,9 +923,15 @@ router.post('/:id/cancel', async (req, res) => {
         throw new Error('Cannot cancel invoice: sales returns have already been processed against this invoice');
       }
 
+      // Block cancellation if active payments exist
+      const activePaymentsCount = await tx.payment.count({
+        where: { entityType: 'INVOICE', entityId: invoice.id, status: 'ACTIVE' },
+      });
+      if (activePaymentsCount > 0 || new Decimal(invoice.paidAmount || 0).gt(0)) {
+        throw new Error('Cannot cancel invoice: active payments have already been recorded against this invoice. Void active payments first.');
+      }
+
       // Restore stock per item and write a StockTransaction of type CANCELLATION.
-      // Note: Unlike decrements (purchases/sales), stock restoration is an additive increment,
-      // so there is no lower-bound 'insufficient stock' condition to guard against.
       for (const item of invoice.items) {
         await tx.product.update({
           where: { id: item.productId },
@@ -593,6 +966,18 @@ router.post('/:id/cancel', async (req, res) => {
         },
       });
 
+      // Record edit log for cancellation
+      await tx.editLog.create({
+        data: {
+          entityType: 'INVOICE',
+          entityId: invoice.id,
+          fieldChanged: 'Status',
+          oldValue: 'ACTIVE',
+          newValue: 'CANCELLED',
+          reason: reason.trim(),
+        },
+      });
+
       return updated;
     }, { maxWait: 15000, timeout: 20000 });
 
@@ -603,4 +988,114 @@ router.post('/:id/cancel', async (req, res) => {
   }
 });
 
+// POST /invoices/:id/payments - Record payment against invoice (atomically with FOR UPDATE row lock)
+router.post('/:id/payments', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { amount, paymentDate, paymentMethod = 'CASH', notes } = req.body;
+
+    if (!amount || isNaN(amount) || Number(amount) <= 0) {
+      return res.status(400).json({ error: 'Payment amount must be greater than zero' });
+    }
+
+    const payAmount = new Decimal(amount);
+
+    let parsedPaymentDate = new Date();
+    if (paymentDate) {
+      const d = new Date(paymentDate);
+      if (isNaN(d.getTime())) {
+        return res.status(400).json({ error: 'Invalid payment date' });
+      }
+      const endOfToday = new Date();
+      endOfToday.setHours(23, 59, 59, 999);
+      if (d > endOfToday) {
+        return res.status(400).json({ error: 'Payment date cannot be in the future' });
+      }
+      parsedPaymentDate = d;
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      // 1. Acquire row-level lock on Invoice to prevent concurrent overpayments
+      await tx.$queryRaw`
+        SELECT id FROM "Invoice"
+        WHERE id = ${id}
+        FOR UPDATE
+      `;
+
+      const invoice = await tx.invoice.findUnique({
+        where: { id },
+      });
+
+      if (!invoice) {
+        throw new Error('Invoice not found');
+      }
+
+      if (invoice.status === 'CANCELLED') {
+        throw new Error('Cannot record payment against a cancelled invoice');
+      }
+
+      const currentPaid = new Decimal(invoice.paidAmount || 0);
+      const totalBill = new Decimal(invoice.billAmount);
+      const newPaid = currentPaid.plus(payAmount);
+
+      if (newPaid.greaterThan(totalBill)) {
+        const remaining = totalBill.minus(currentPaid);
+        throw new Error(
+          `Payment of ₹${payAmount.toFixed(2)} exceeds remaining balance of ₹${remaining.toFixed(2)} (Bill: ₹${totalBill.toFixed(2)}, Already paid: ₹${currentPaid.toFixed(2)})`
+        );
+      }
+
+      const newStatus = newPaid.greaterThanOrEqualTo(totalBill)
+        ? 'PAID'
+        : (newPaid.greaterThan(0) ? 'PARTIAL' : 'UNPAID');
+
+      const payment = await tx.payment.create({
+        data: {
+          entityType: 'INVOICE',
+          entityId: invoice.id,
+          amount: payAmount,
+          paymentDate: parsedPaymentDate,
+          paymentMethod: paymentMethod || 'CASH',
+          notes: notes ? notes.trim() : null,
+          status: 'ACTIVE',
+        },
+      });
+
+      const updatedInvoice = await tx.invoice.update({
+        where: { id: invoice.id },
+        data: {
+          paidAmount: newPaid,
+          paymentStatus: newStatus,
+          paymentMethod: invoice.paymentMethod || paymentMethod || 'CASH',
+        },
+      });
+
+      return { payment, invoice: updatedInvoice };
+    }, { maxWait: 15000, timeout: 20000 });
+
+    res.status(201).json(result);
+  } catch (error) {
+    console.error('Error recording invoice payment:', error.message);
+    res.status(400).json({ error: error.message || 'Failed to record payment' });
+  }
+});
+
+// GET /invoices/:id/payments - List payments for invoice
+router.get('/:id/payments', async (req, res) => {
+  try {
+    const payments = await prisma.payment.findMany({
+      where: {
+        entityType: 'INVOICE',
+        entityId: req.params.id,
+      },
+      orderBy: { paymentDate: 'desc' },
+    });
+    res.json(payments);
+  } catch (error) {
+    console.error('Error fetching invoice payments:', error);
+    res.status(500).json({ error: 'Failed to fetch payments', details: error.message });
+  }
+});
+
 export default router;
+

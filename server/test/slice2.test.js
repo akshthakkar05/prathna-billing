@@ -25,9 +25,9 @@ test('Invoice number uniqueness under concurrent creation (atomic sequential gen
 
   console.log('   Generated sequential numbers:', results);
 
-  // Assert all numbers match INV-<number>
+  // Assert all numbers match INV-<number> or INV/YY-YY/<number>
   results.forEach((num) => {
-    assert.match(num, /^INV-\d+$/, 'Invoice number must match format INV-<digits>');
+    assert.match(num, /^(INV-\d+|INV\/\d{2}-\d{2}\/\d+)$/, 'Invoice number must match format INV-<digits> or INV/YY-YY/<digits>');
   });
 
   // Assert uniqueness: no duplicate numbers allowed

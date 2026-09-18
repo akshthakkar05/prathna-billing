@@ -59,10 +59,12 @@ test('Operational Dashboard & Sales Trend Suite', async (t) => {
     assert.ok(Array.isArray(data.stockOverview), 'Must have stockOverview array');
     assert.ok(Array.isArray(data.recentInvoices), 'Must have recentInvoices array');
 
-    // Verify strict exclusion of receivables / outstanding
-    assert.equal(data.outstanding, undefined, 'Must not have outstanding');
-    assert.equal(data.receivables, undefined, 'Must not have receivables');
-    assert.equal(data.totalOutstanding, undefined, 'Must not have totalOutstanding');
+    // Verify outstanding receivables & payables metrics
+    assert.ok(data.outstanding, 'Must have outstanding');
+    assert.ok(data.outstanding.totalReceivables !== undefined, 'Must have totalReceivables');
+    assert.ok(data.outstanding.totalPayables !== undefined, 'Must have totalPayables');
+    assert.ok(data.outstanding.unpaidInvoicesCount !== undefined, 'Must have unpaidInvoicesCount');
+    assert.ok(data.outstanding.unpaidPurchasesCount !== undefined, 'Must have unpaidPurchasesCount');
 
     // Verify stock status calculation
     for (const item of data.stockOverview) {
