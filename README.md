@@ -16,7 +16,7 @@ A full-stack Point of Sale (POS), GST invoicing, purchase tracking, and inventor
 
 ## 🚀 Key Features
 
-- **GST Tax Invoicing:** Dynamic Indian Financial Year serial numbering (`INV/26-27/1001`), auto intra-state (CGST + SGST 9%+9%) vs inter-state (IGST 18%) calculation.
+- **GST Tax Invoicing:** Sequential serial numbering with 3-digit padding (`INV-056`, `INV-057`...), auto intra-state (CGST + SGST 9%+9%) vs inter-state (IGST 18%) calculation.
 - **Bilingual Invoices:** Professional A4 GST tax invoices with terms in English & Gujarati.
 - **Inventory & Stock Tracking:** Real-time stock decrement, low-stock warnings, and transaction logs.
 - **Customer & Supplier Management:** Quick customer lookup, GSTIN validation, and purchase tracking.

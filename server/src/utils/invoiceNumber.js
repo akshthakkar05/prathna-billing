@@ -17,28 +17,28 @@ export function getFinancialYearString(date = new Date()) {
 }
 
 /**
- * Atomically generates the next sequential invoice number in format INV/<FY>/<number> (e.g. "INV/26-27/1001").
- * The financial year is dynamically computed from the invoice date (April 1st to March 31st).
+ * Atomically generates the next sequential invoice number in format INV-<number> (e.g. "INV-056", "INV-057").
+ * Formats sequence numbers with minimum 3-digit padding.
  * Uses PostgreSQL ON CONFLICT DO UPDATE ... RETURNING to guarantee row-level lock
  * and prevent duplicate numbers under high concurrency.
  *
  * @param {import('@prisma/client').PrismaClient} tx - Active Prisma transaction client
- * @param {Date|string} [invoiceDate] - Optional invoice date
- * @returns {Promise<string>} Next invoice number, e.g. "INV/26-27/1001"
+ * @returns {Promise<string>} Next invoice number, e.g. "INV-056"
  */
-export async function getNextInvoiceNumber(tx, invoiceDate = new Date()) {
+export async function getNextInvoiceNumber(tx) {
   const result = await tx.$queryRaw`
     INSERT INTO "InvoiceCounter" ("name", "current")
-    VALUES ('invoice', 1001)
+    VALUES ('invoice', 56)
     ON CONFLICT ("name")
     DO UPDATE SET "current" = "InvoiceCounter"."current" + 1
     RETURNING "current";
   `;
 
   const currentNum = result[0].current;
-  const fy = getFinancialYearString(invoiceDate);
-  return `INV/${fy}/${currentNum}`;
+  const paddedNum = String(currentNum).padStart(3, '0');
+  return `INV-${paddedNum}`;
 }
+
 
 
 

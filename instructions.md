@@ -92,6 +92,5 @@ VITE_API_URL=https://prathna-billing.onrender.com
 3. **Daily Login Session**:
    - Staff/admin sessions are authenticated with JSON Web Tokens (JWT) requiring 1 login per day.
 4. **GST Invoice Numbering**:
-   - Invoices are dynamically generated as `INV/<FY>/<Sequence>` (e.g. `INV/26-27/1001`, `INV/26-27/1002`).
-   - The Financial Year is calculated dynamically from the invoice date (April 1st to March 31st).
-   - Fully compliant with Rule 46(b) of the CGST Rules (14 characters, letters/digits/hyphens/slashes).
+   - Invoices are generated sequentially as `INV-<3-digit-padded-number>` (starting from `INV-056`, `INV-057`, etc.).
+   - Fully compliant with Rule 46(b) of the CGST Rules.
