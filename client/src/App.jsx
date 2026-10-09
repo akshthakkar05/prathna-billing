@@ -597,6 +597,7 @@ export default function App() {
   const [creatingInvoice, setCreatingInvoice] = useState(false);
   const [savedInvoiceJSON, setSavedInvoiceJSON] = useState(null);
   const [invoicePaymentMethod, setInvoicePaymentMethod] = useState("CASH");
+  const [nextInvoiceNumber, setNextInvoiceNumber] = useState("INV-056");
 
   // Cancellation Modals State
   const [cancelInvoiceModal, setCancelInvoiceModal] = useState(null);
@@ -1015,9 +1016,14 @@ export default function App() {
     });
     const p8 = fetchEndpoint("/purchases", setPurchases, CACHE_KEYS.PURCHASES);
     const p9 = fetchEndpoint("/dashboard/sales-trend?range=7d", setSalesTrend, CACHE_KEYS.SALES_TREND);
+    const p10 = fetchEndpoint("/invoices/next-number", (data) => {
+      if (data && data.nextInvoiceNumber) {
+        setNextInvoiceNumber(data.nextInvoiceNumber);
+      }
+    });
 
     try {
-      await Promise.allSettled([p1, p2, p3, p4, p5, p6, p7, p8, p9]);
+      await Promise.allSettled([p1, p2, p3, p4, p5, p6, p7, p8, p9, p10]);
     } catch (err) {
       console.error("Failed to load store data:", err);
       if (err.message !== "Session expired") {
@@ -2784,10 +2790,50 @@ export default function App() {
             <LayoutDashboard size={18} /> Dashboard
           </button>
           <button
-            className={`nav-item ${activeTab === "invoice" ? "active" : ""}`}
-            onClick={() => handleNavClick("invoice")}
+            className={`nav-item ${activeTab === "invoice" && invoiceSubTab === "create" ? "active" : ""}`}
+            onClick={() => {
+              setInvoiceSubTab("create");
+              handleNavClick("invoice");
+            }}
           >
             <Receipt size={18} /> Invoices
+          </button>
+          <button
+            className={`nav-item ${activeTab === "invoice" && invoiceSubTab === "history" ? "active" : ""}`}
+            style={{
+              paddingLeft: "34px",
+              fontSize: "0.85rem",
+              marginTop: "-2px",
+              marginBottom: "2px",
+            }}
+            onClick={() => {
+              setInvoiceSubTab("history");
+              handleNavClick("invoice");
+            }}
+          >
+            <History size={16} /> Past Invoices
+            {invoices.length > 0 && (
+              <span
+                style={{
+                  marginLeft: "auto",
+                  fontSize: "0.75rem",
+                  fontWeight: 600,
+                  padding: "1px 7px",
+                  borderRadius: "10px",
+                  background:
+                    activeTab === "invoice" && invoiceSubTab === "history"
+                      ? "var(--primary)"
+                      : "var(--bg-canvas)",
+                  color:
+                    activeTab === "invoice" && invoiceSubTab === "history"
+                      ? "#FFFFFF"
+                      : "var(--text-secondary)",
+                  border: "1px solid var(--border)",
+                }}
+              >
+                {invoices.length}
+              </span>
+            )}
           </button>
           <button
             className={`nav-item ${activeTab === "purchase" ? "active" : ""}`}
@@ -3992,6 +4038,76 @@ export default function App() {
                     )}
 
                     <div className="card">
+                      {/* Upcoming Invoice Number Indicator */}
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          padding: "12px 16px",
+                          background: "var(--bg-canvas)",
+                          border: "1px solid var(--border)",
+                          borderRadius: "var(--radius)",
+                          marginBottom: "18px",
+                          flexWrap: "wrap",
+                          gap: "10px",
+                        }}
+                      >
+                        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                          <div
+                            style={{
+                              width: "36px",
+                              height: "36px",
+                              borderRadius: "8px",
+                              background: "var(--bg-surface)",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              border: "1px solid var(--border)",
+                              color: "var(--primary)",
+                            }}
+                          >
+                            <Receipt size={18} />
+                          </div>
+                          <div>
+                            <div
+                              style={{
+                                fontSize: "0.75rem",
+                                fontWeight: 600,
+                                color: "var(--text-secondary)",
+                                textTransform: "uppercase",
+                                letterSpacing: "0.5px",
+                              }}
+                            >
+                              Current Invoice Number
+                            </div>
+                            <div
+                              style={{
+                                fontSize: "1.125rem",
+                                fontWeight: 700,
+                                color: "var(--text-primary)",
+                                letterSpacing: "0.5px",
+                              }}
+                            >
+                              {nextInvoiceNumber || "INV-056"}
+                            </div>
+                          </div>
+                        </div>
+                        <div
+                          style={{
+                            fontSize: "0.75rem",
+                            fontWeight: 600,
+                            padding: "4px 12px",
+                            borderRadius: "20px",
+                            background: "#E0F2FE",
+                            color: "#0369A1",
+                            border: "1px solid #BAE6FD",
+                          }}
+                        >
+                          Auto-assigned on save
+                        </div>
+                      </div>
+
                       {/* Step 1: Customer Selection */}
                       {recentCustomers && recentCustomers.length > 0 && (
                         <div style={{ marginBottom: "14px" }}>

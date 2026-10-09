@@ -61,6 +61,21 @@ router.get('/', async (req, res) => {
   }
 });
 
+// GET /invoices/next-number - Preview the next invoice number without incrementing
+router.get('/next-number', async (req, res) => {
+  try {
+    const counter = await prisma.invoiceCounter.findUnique({
+      where: { name: 'invoice' },
+    });
+    const nextVal = counter ? counter.current + 1 : 56;
+    const padded = String(nextVal).padStart(3, '0');
+    res.json({ nextInvoiceNumber: `INV-${padded}` });
+  } catch (error) {
+    console.error('Error fetching next invoice number:', error);
+    res.status(500).json({ error: 'Failed to preview next invoice number', details: error.message });
+  }
+});
+
 // GET /invoices/:id - fetch single invoice with flexible number / id lookup
 router.get('/:id', async (req, res) => {
   try {
